@@ -1,0 +1,6 @@
+{
+  "name": "FounderBrief",
+  "description": "Formulate technical blueprints, user stories, and dev vetting questions for your startup ideas using AI.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
