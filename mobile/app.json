@@ -1,0 +1,42 @@
+{
+  "expo": {
+    "name": "FounderBrief",
+    "slug": "founderbrief",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "resizeMode": "contain",
+      "backgroundColor": "#FAF8F5"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.founderbrief.app"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#FAF8F5"
+      },
+      "package": "com.founderbrief.app",
+      "permissions": [
+        "RECORD_AUDIO",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS"
+      ]
+    },
+    "plugins": [
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "FounderBrief needs microphone access so you can dictate your startup idea."
+        }
+      ]
+    ],
+    "extra": {
+      "apiUrl": "http://localhost:3000",
+      "eas": {
+        "projectId": "c1d8b43a-3276-4987-ba7c-9f26836de165"
+      }
+    }
+  }
+}
