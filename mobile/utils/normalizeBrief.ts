@@ -1,6 +1,8 @@
 import { DEFAULT_ANSWERS, ProjectBrief } from "../types";
 
-export function normalizeBrief(raw: Partial<ProjectBrief> & { coreFeatures?: string[]; devQuestions?: string[] }): ProjectBrief {
+export function normalizeBrief(
+  raw: Partial<ProjectBrief> & { coreFeatures?: string[]; devQuestions?: string[] }
+): ProjectBrief {
   const answers = { ...DEFAULT_ANSWERS, ...(raw.answers ?? {}) };
   const legacyFeatures = raw.coreFeatures ?? [];
   const legacyQuestions = raw.devQuestions ?? [];
@@ -18,7 +20,11 @@ export function normalizeBrief(raw: Partial<ProjectBrief> & { coreFeatures?: str
     userStories: raw.userStories ?? [],
     functionalRequirements:
       raw.functionalRequirements ??
-      legacyFeatures.map((f) => ({ name: f.split(" - ")[0] || f, priority: "High" as const, details: f })),
+      legacyFeatures.map((f) => ({
+        name: f.split(" - ")[0] || f,
+        priority: "High" as const,
+        details: f,
+      })),
     userExperience: raw.userExperience ?? {
       entryPoint: "User lands on home screen and completes core onboarding.",
       coreSteps: ["Sign up", "Complete primary action", "Review results"],
@@ -46,5 +52,12 @@ export function normalizeBrief(raw: Partial<ProjectBrief> & { coreFeatures?: str
     createdAt: raw.createdAt ?? new Date().toISOString(),
     originalIdea: raw.originalIdea ?? "",
     answers,
+    documentType: raw.documentType ?? "PRD",
+    direction: raw.direction ?? "voice-to-doc",
+    spokenLanguage: raw.spokenLanguage ?? "Urdu",
+    voiceId: raw.voiceId,
+    playbackSpeed: raw.playbackSpeed ?? 1.0,
+    audioFormat: raw.audioFormat ?? "MP3",
+    durationSec: raw.durationSec,
   };
 }

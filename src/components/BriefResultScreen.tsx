@@ -1,258 +1,216 @@
 import React, { useState } from "react";
-import { motion } from "motion/react";
-import { ProjectBrief } from "../types";
-import { 
-  CheckCircle2, 
-  Copy, 
-  Check, 
-  FileDown, 
-  Share2, 
-  Users, 
-  MessageSquare, 
-  Folder, 
-  RefreshCw, 
-  Activity, 
-  DollarSign,
-  FileText
+import {
+  Download,
+  Volume2,
+  Plus,
+  Check,
+  FileText,
 } from "lucide-react";
+import { ExportDocFormat, ProjectBrief } from "../types";
 
 interface BriefResultScreenProps {
   brief: ProjectBrief;
-  onRestart: () => void;
-  onSave?: (brief: ProjectBrief) => void;
+  onStartOver: () => void;
+  onOpenInReadAloud?: (brief: ProjectBrief) => void;
 }
 
-export default function BriefResultScreen({ brief, onRestart, onSave }: BriefResultScreenProps) {
-  const [copied, setCopied] = useState(false);
+export const BriefResultScreen: React.FC<BriefResultScreenProps> = ({
+  brief,
+  onStartOver,
+  onOpenInReadAloud,
+}) => {
+  const [exportedFmt, setExportedFmt] = useState<ExportDocFormat | null>(null);
 
-  const handleCopyText = () => {
-    const textBlock = `
-========================================
-FOUNDERBRIEF TECHNICAL BLUEPRINT: ${brief.title.toUpperCase()}
-========================================
+  const docType = brief.documentType || "PRD";
+  const lang = brief.spokenLanguage || "Urdu";
 
-Project Overview:
-${brief.description}
+  const handleExport = (fmt: ExportDocFormat) => {
+    const md =
+      brief.documentMarkdown ||
+      `# ${brief.title} (${docType})\n\n${brief.description}\n\n## Core Features\n${brief.coreFeatures.map((f) => `- ${f}`).join("\n")}\n\n## User Stories\n${brief.userStories.map((s) => `- ${s}`).join("\n")}\n\n## Key Considerations\n${brief.devQuestions.map((q) => `- ${q}`).join("\n")}`;
 
-Complexity: ${brief.complexity}
-Estimated Budget Range: ${brief.estimatedBudget}
+    const safeName = brief.title.toLowerCase().replace(/[^a-z0-9]+/g, "-");
 
-----------------------------------------
-CORE SYSTEM MVP FEATURES:
-----------------------------------------
-${brief.coreFeatures.map((f, i) => `${i + 1}. ${f}`).join("\n")}
+    if (fmt === "PDF") {
+      window.print();
+    } else if (fmt === "Word") {
+      const wordHtml = `<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'><head><meta charset='utf-8'><title>${brief.title}</title></head><body style="font-family:sans-serif;padding:32px;color:#1C2120"><h1>${brief.title} (${docType})</h1><p>${brief.description}</p><pre style="white-space:pre-wrap;font-family:sans-serif">${md}</pre></body></html>`;
+      const blob = new Blob([wordHtml], { type: "application/msword" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${safeName}.doc`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } else {
+      const blob = new Blob([md], { type: "text/plain;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${safeName}.txt`;
+      a.click();
+      URL.revokeObjectURL(url);
+    }
 
-----------------------------------------
-INVESTOR-READY USER STORIES:
-----------------------------------------
-${brief.userStories.map((u, i) => `Story ${i + 1}: ${u}`).join("\n")}
-
-----------------------------------------
-DEV VETTING QUESTIONS: (CTO Level)
-----------------------------------------
-${brief.devQuestions.map((q, i) => `Question ${i + 1}: ${q}`).join("\n")}
-
-Generated via FounderBrief (c) ${new Date().getFullYear()} - Professional Startup Alignment.
-========================================
-    `.trim();
-
-    navigator.clipboard.writeText(textBlock).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2500);
-    }).catch(err => {
-      console.error("Clipboard copy failure:", err);
-    });
-  };
-
-  const handlePdfTrigger = () => {
-    window.print();
-  };
-
-  const handleWhatsAppShare = () => {
-    const shareText = encodeURIComponent(
-      `FounderBrief Project Ready!\n\n🚀 Project: *${brief.title}*\n⭐ Complexity: *${brief.complexity}*\n💳 Est. Budget: *${brief.estimatedBudget}*\n\nRead more details inside your FounderBrief app profile.`
-    );
-    window.open(`https://api.whatsapp.com/send?text=${shareText}`, "_blank");
+    setExportedFmt(fmt);
+    setTimeout(() => setExportedFmt(null), 2200);
   };
 
   return (
-    <motion.div
-      initial={{ opacity: 0, scale: 0.98 }}
-      animate={{ opacity: 1, scale: 1 }}
-      exit={{ opacity: 0 }}
-      transition={{ duration: 0.4 }}
-      className="flex-grow flex flex-col justify-start px-4 sm:px-6 pt-6 pb-40 max-w-2xl mx-auto w-full print:p-0 print:pb-0 font-sans"
-    >
-      {/* Print-only Header section */}
-      <div className="hidden print:block mb-8">
-        <h1 className="text-2xl font-bold text-black border-b pb-2">FOUNDERBRIEF TECHNICAL SPECIFICATIONS</h1>
-        <p className="text-xs text-gray-500 mt-1">Generated dynamically on {new Date(brief.createdAt).toLocaleDateString()}</p>
-      </div>
-
-      {/* On Screen Main success marker section */}
-      <div className="flex flex-col items-center text-center mb-6 print:hidden">
-        <div className="w-12 h-12 bg-green-50 text-green-700 rounded-full flex items-center justify-center mb-3 border border-green-100 shadow-sm">
-          <CheckCircle2 className="w-6 h-6" />
-        </div>
-        <h1 className="text-xl sm:text-2xl font-extrabold text-[#1A1A1A] tracking-tight mb-1">
-          Your project brief is ready!
-        </h1>
-        <p className="text-xs text-[#444748]">
-          We've compiled your concept response answers into a professional blueprint spec.
-        </p>
-      </div>
-
-      {/* Main Core Blueprint Grid Sheets */}
-      <div className="space-y-4 print-card">
-        {/* Row 1: Project Title, Summary */}
-        <section className="p-5 bg-[#F2EEE8] border border-[#E5DDD3] rounded-2xl block text-left">
-          <span className="text-[10px] font-bold text-[#E07B39] uppercase tracking-wider font-mono">Project Name Draft</span>
-          <h2 className="text-lg sm:text-xl font-extrabold text-[#1A1A1A] tracking-tight mt-1 mb-2 leading-tight">{brief.title}</h2>
-          <p className="text-xs sm:text-sm text-[#444748] leading-relaxed italic border-l-2 border-[#E07B39] pl-3 font-normal">
-            "{brief.description}"
+    <div className="w-full max-w-4xl mx-auto px-4 sm:px-6 pt-6 pb-24">
+      {/* RIGHT BUBBLE: Original Spoken Voice Note (#1C2120 Dark Bubble) */}
+      <div className="flex justify-end mb-5">
+        <div className="w-[88%] sm:w-[78%] bg-[#1C2120] text-white rounded-[30px] rounded-br-[10px] p-5 fb-dark-bubble-shadow">
+          <div className="flex items-center justify-between mb-2">
+            <span className="font-mono text-[10px] font-extrabold bg-[#272E2C] text-[#FBFF28] px-3 py-1 rounded-full">
+              SPOKEN VOICE NOTE • {lang.toUpperCase()}
+            </span>
+            <div className="flex items-center gap-1">
+              {[8, 14, 10, 18, 12, 16, 10, 14].map((h, i) => (
+                <span
+                  key={i}
+                  style={{ height: `${h}px` }}
+                  className="w-1 rounded-full bg-[#FBFF28] inline-block"
+                />
+              ))}
+            </div>
+          </div>
+          <p className="text-sm text-[#B8C7C4] italic leading-relaxed">
+            “{brief.originalIdea || brief.description}”
           </p>
-        </section>
+        </div>
+      </div>
 
-        {/* Complexity and Budget metrics row - responsive grid */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          {/* Complexity metric */}
-          <div className="p-4 bg-[#F2EEE8] border border-[#E5DDD3] rounded-2xl flex flex-col justify-between text-left">
-            <span className="text-[10px] font-bold text-[#444748] uppercase tracking-wider font-mono block mb-1">Complexity</span>
-            <div className="flex items-center gap-1.5 mt-1">
-              <span className={`font-black text-sm uppercase tracking-wider ${
-                brief.complexity === "Low" ? "text-green-700" : brief.complexity === "High" ? "text-red-600" : "text-[#E07B39]"
-              }`}>
-                {brief.complexity}
-              </span>
-              <Activity className="w-4 h-4 text-[#747878]" />
-            </div>
-          </div>
-
-          {/* Budget estimate indicator */}
-          <div className="p-4 bg-[#F2EEE8] border border-[#E5DDD3] rounded-xl flex flex-col justify-between text-left">
-            <span className="text-[10px] font-bold text-[#444748] uppercase tracking-wider font-mono block mb-1">EST. BUDGET</span>
-            <div className="flex items-center gap-1 mt-1">
-              <DollarSign className="w-4 h-4 text-emerald-600 shrink-0" />
-              <span className="text-sm sm:text-base font-extrabold text-[#1A1A1A] tracking-tight">{brief.estimatedBudget}</span>
-            </div>
-          </div>
+      {/* LEFT BUBBLE: Generated Document Masthead (#FFFFFF Bubble) */}
+      <div className="bg-white rounded-[34px] rounded-tl-[10px] p-6 sm:p-8 fb-bubble-shadow mb-6">
+        <div className="flex flex-wrap items-center gap-2.5 mb-4">
+          <span className="font-mono text-xs font-extrabold bg-[#FBFF28] text-[#1C2120] px-3.5 py-1 rounded-full">
+            {docType.toUpperCase()}
+          </span>
+          <span className="font-mono text-xs font-extrabold bg-[#DAF7F3] text-[#1C2120] px-3.5 py-1 rounded-full">
+            {brief.complexity} Scope
+          </span>
+          <span className="font-mono text-xs font-extrabold bg-[#1C2120] text-[#FBFF28] px-3.5 py-1 rounded-full">
+            {brief.estimatedBudget}
+          </span>
         </div>
 
-        {/* Core Features list item group */}
-        <section className="p-5 bg-[#F2EEE8] border border-[#E5DDD3] rounded-2xl text-left">
-          <div className="flex items-center justify-between mb-4 pb-2 border-b border-[#E5DDD3]/60">
-            <h3 className="text-xs sm:text-sm font-extrabold text-[#1A1A1A] tracking-tight uppercase flex items-center gap-1.5">
-              <Folder className="w-4 h-4 text-[#E07B39]" />
-              <span>Primary MVP Scope Features</span>
-            </h3>
-            <span className="text-[9px] font-mono bg-[#E5DDD3] px-2 py-0.5 rounded-full font-bold text-[#444748]">4 Elements</span>
+        <h1 className="text-2xl sm:text-4xl font-extrabold text-[#1C2120] tracking-tight mb-4">
+          {brief.title}
+        </h1>
+
+        <div className="bg-[#DAF7F3] rounded-[24px] p-5 mb-6">
+          <div className="font-mono text-[10px] font-extrabold text-[#4A5754] uppercase tracking-wider mb-1">
+            EXECUTIVE SUMMARY
           </div>
-          
-          <ul className="space-y-3">
-            {brief.coreFeatures.map((feat, index) => {
-              const parts = feat.split(" - ");
+          <p className="text-sm sm:text-base text-[#1C2120] leading-relaxed font-medium">
+            {brief.description}
+          </p>
+        </div>
+
+        {/* Tinrec-style One-Click Export Row: Word | PDF | TXT */}
+        <div className="mb-5">
+          <div className="font-mono text-[10px] font-extrabold text-[#4A5754] uppercase tracking-wider mb-2.5">
+            ONE-CLICK EXPORT (TINREC FORMATS)
+          </div>
+          <div className="grid grid-cols-3 gap-3">
+            {(["Word", "PDF", "TXT"] as ExportDocFormat[]).map((fmt) => {
+              const done = exportedFmt === fmt;
               return (
-                <li key={index} className="flex items-start gap-2">
-                  <span className="text-green-600 text-sm font-bold mt-0.5 shrink-0">✓</span>
-                  <div className="text-xs sm:text-sm text-[#1A1A1A] leading-relaxed">
-                    {parts.length > 1 ? (
-                      <>
-                        <strong className="font-bold text-neutral-900">{parts[0]}</strong> — {parts.slice(1).join(" - ")}
-                      </>
-                    ) : (
-                      feat
-                    )}
-                  </div>
-                </li>
+                <button
+                  key={fmt}
+                  type="button"
+                  onClick={() => handleExport(fmt)}
+                  className={`fb-interactive py-3.5 px-4 rounded-full font-mono text-xs font-extrabold inline-flex items-center justify-center gap-2 ${
+                    fmt === "PDF"
+                      ? "bg-[#FBFF28] text-[#1C2120] fb-pill-shadow"
+                      : "bg-[#DAF7F3] text-[#1C2120] hover:bg-[#1C2120] hover:text-[#FBFF28]"
+                  }`}
+                >
+                  {done ? <Check className="w-4 h-4" /> : <Download className="w-4 h-4" />}
+                  <span>{done ? `Exported ${fmt}` : `Export ${fmt}`}</span>
+                </button>
               );
             })}
-          </ul>
-        </section>
-
-        {/* Target User Stories cards */}
-        <section className="p-5 bg-[#F2EEE8] border border-[#E5DDD3] rounded-2xl text-left">
-          <div className="flex items-center justify-between mb-4 pb-2 border-b border-[#E5DDD3]/60">
-            <h3 className="text-xs sm:text-sm font-extrabold text-[#1A1A1A] tracking-tight uppercase flex items-center gap-1.5">
-              <Users className="w-4 h-4 text-[#E07B39]" />
-              <span>Investor-Ready User Stories</span>
-            </h3>
-            <span className="text-[9px] font-mono bg-[#E5DDD3] px-2 py-0.5 rounded-full font-bold text-[#444748]">Personas v1.0</span>
           </div>
+        </div>
 
-          <div className="space-y-3">
-            {brief.userStories.map((story, i) => (
-              <div key={i} className="p-3 bg-[#FAF8F5] border border-[#E5DDD3] rounded-xl">
-                <p className="text-xs text-[#444748] italic leading-relaxed">
-                  "{story}"
-                </p>
+        {/* Direction 2 Bridge: Listen in Read Aloud */}
+        {onOpenInReadAloud ? (
+          <button
+            type="button"
+            onClick={() => onOpenInReadAloud(brief)}
+            className="fb-interactive fb-dark-bubble-shadow w-full bg-[#1C2120] text-white rounded-[24px] p-4 flex items-center justify-between"
+          >
+            <div className="flex items-center gap-3.5">
+              <div className="w-10 h-10 rounded-full bg-[#FBFF28] text-[#1C2120] flex items-center justify-center">
+                <Volume2 className="w-5 h-5" />
               </div>
-            ))}
-          </div>
-        </section>
-
-        {/* ADVANCED DEV QUESTIONS vetting checklist */}
-        <section className="p-5 bg-[#F2EEE8] border border-[#E5DDD3] border-l-4 border-l-[#E07B39] rounded-2xl text-left">
-          <div className="flex items-center justify-between mb-3">
-            <h3 className="text-xs sm:text-sm font-extrabold text-[#1A1A1A] tracking-tight uppercase flex items-center gap-1.5">
-              <MessageSquare className="w-4 h-4 text-[#E07B39]" />
-              <span>Dev Agency Vetting Questions</span>
-            </h3>
-          </div>
-          <p className="text-[11px] text-[#444748] mb-4 font-normal leading-relaxed">
-            Ask these specific advanced technology questions when you vet development agencies or freelancers:
-          </p>
-
-          <div className="space-y-3">
-            {brief.devQuestions.map((question, qIdx) => (
-              <div key={qIdx} className="flex gap-2.5 items-start">
-                <span className="text-[#E07B39] font-bold text-xs mt-0.5 font-mono">•</span>
-                <p className="text-xs sm:text-sm text-[#1A1A1A] leading-relaxed font-normal">{question}</p>
+              <div className="text-left">
+                <div className="font-extrabold text-sm text-white">
+                  Listen to this {docType} in Read Aloud Studio
+                </div>
+                <div className="text-xs text-[#B8C7C4]">
+                  Select Urdu, Hindi, Arabic, or English voice • 0.5x–1.5x speed • MP3/AAC/WAV
+                </div>
               </div>
-            ))}
-          </div>
-        </section>
+            </div>
+            <span className="font-extrabold text-[#FBFF28] pr-2">→</span>
+          </button>
+        ) : null}
       </div>
 
-      {/* Floating Action Trigger Drawer (Sticky layout at bottom matching specs) */}
-      <div className="fixed bottom-16 sm:bottom-0 left-0 w-full z-50 pt-6 pb-8 px-5 bg-gradient-to-t from-[#FAF8F5] via-[#FAF8F5]/90 to-transparent print:hidden no-print">
-        <div className="max-w-md mx-auto space-y-2.5 bg-[#FAF8F5] p-3 rounded-2xl border border-[#E5DDD3]/70 shadow-lg">
-          {/* Main Copy Brief Action */}
-          <button
-            onClick={handleCopyText}
-            className="w-full bg-[#1A1A1A] hover:bg-neutral-800 text-[#FAF8F5] h-12 rounded-xl font-bold text-xs sm:text-sm flex items-center justify-center gap-2 active:scale-95 transition-all shadow-md cursor-pointer"
-          >
-            {copied ? <Check className="w-4 h-4 text-[#E07B39]" /> : <Copy className="w-4 h-4" />}
-            <span>{copied ? "Specs Copied to Clipboard!" : "Copy Technical Specs"}</span>
-          </button>
-
-          {/* Secondary Actions PDF & WhatsApp row */}
-          <div className="flex gap-2">
-            <button
-              onClick={handlePdfTrigger}
-              className="flex-1 bg-[#F2EEE8] border border-[#E5DDD3] text-[#1A1A1A] h-11 rounded-xl font-semibold text-xs flex items-center justify-center gap-1.5 hover:bg-[#E5DDD3] transition-colors cursor-pointer"
-            >
-              <FileDown className="w-3.5 h-3.5" />
-              <span>Export PDF File</span>
-            </button>
-
-            <button
-              onClick={handleWhatsAppShare}
-              className="flex-1 bg-[#25D366] hover:bg-[#20ba56] text-white h-11 rounded-xl font-semibold text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
-            >
-              <Share2 className="w-3.5 h-3.5" />
-              <span>Share to WhatsApp</span>
-            </button>
+      {/* Structured Sections as Bubble Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-5 mb-6">
+        <div className="bg-white rounded-[28px] p-6 fb-bubble-shadow">
+          <div className="inline-flex items-center gap-2 bg-[#FBFF28] text-[#1C2120] font-mono text-[10px] font-extrabold px-3 py-1 rounded-full mb-3">
+            01 • CORE DELIVERABLES & SCOPE
           </div>
+          <ul className="space-y-2.5">
+            {brief.coreFeatures.map((feat, i) => (
+              <li key={i} className="flex items-start gap-2.5 text-sm text-[#323B39]">
+                <span className="w-2 h-2 rounded-full bg-[#1C2120] mt-1.5 shrink-0" />
+                <span>{feat}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
 
-          {/* Create new/restart project buttons */}
-          <button
-            onClick={onRestart}
-            className="w-full text-center text-xs font-bold text-[#E07B39] hover:underline pt-1.5 inline-block cursor-pointer"
-          >
-            Formulate Another Idea Brief
-          </button>
+        <div className="bg-white rounded-[28px] p-6 fb-bubble-shadow">
+          <div className="inline-flex items-center gap-2 bg-[#DAF7F3] text-[#1C2120] font-mono text-[10px] font-extrabold px-3 py-1 rounded-full mb-3">
+            02 • USER STORIES & WORKFLOWS
+          </div>
+          <ul className="space-y-2.5">
+            {brief.userStories.map((story, i) => (
+              <li key={i} className="flex items-start gap-2.5 text-sm text-[#323B39]">
+                <span className="w-2 h-2 rounded-full bg-[#1C2120] mt-1.5 shrink-0" />
+                <span>{story}</span>
+              </li>
+            ))}
+          </ul>
         </div>
       </div>
-    </motion.div>
+
+      {brief.documentMarkdown ? (
+        <div className="bg-white rounded-[30px] p-6 sm:p-8 fb-bubble-shadow mb-6">
+          <div className="inline-flex items-center gap-2 bg-[#1C2120] text-[#FBFF28] font-mono text-[10px] font-extrabold px-3.5 py-1 rounded-full mb-4">
+            <FileText className="w-3.5 h-3.5" />
+            COMPLETE {docType.toUpperCase()} DOSSIER
+          </div>
+          <pre className="whitespace-pre-wrap font-sans text-sm text-[#1C2120] leading-relaxed">
+            {brief.documentMarkdown}
+          </pre>
+        </div>
+      ) : null}
+
+      <button
+        type="button"
+        onClick={onStartOver}
+        className="fb-interactive fb-dark-bubble-shadow w-full bg-[#1C2120] text-[#FBFF28] font-extrabold text-sm py-4 rounded-full inline-flex items-center justify-center gap-2"
+      >
+        <Plus className="w-4 h-4" />
+        Record Another Voice Document
+      </button>
+    </div>
   );
-}
+};

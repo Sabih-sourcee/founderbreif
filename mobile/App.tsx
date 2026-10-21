@@ -1,457 +1,848 @@
-import React, { useState, useEffect, useRef, useCallback } from "react";
-import {
-  View,
-  Text,
-  Pressable,
-  StyleSheet,
-  ActivityIndicator,
-  Modal,
-  Alert,
-} from "react-native";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ActivityIndicator, BackHandler, Keyboard, Linking, Platform, StyleSheet, View } from "react-native";
 import { StatusBar } from "expo-status-bar";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { SafeAreaProvider, useSafeAreaInsets } from "react-native-safe-area-context";
-import LandingScreen from "./components/LandingScreen";
-import DescribeIdeaScreen from "./components/DescribeIdeaScreen";
-import QuestionsScreen from "./components/QuestionsScreen";
-import BriefResultScreen from "./components/BriefResultScreen";
-import BriefHistoryScreen from "./components/BriefHistoryScreen";
-import ProfileScreen from "./components/ProfileScreen";
-import { BriefAnswers, DEFAULT_ANSWERS, ProjectBrief, SessionDraft, Tab, UserProfile, BriefApiResponse } from "./types";
-import { normalizeBrief } from "./utils/normalizeBrief";
-import { COLORS } from "./constants/theme";
 import {
-  generateFounderBrief,
-  checkBackendHealth,
-  getApiBaseUrl,
-  startPrefetchBrief,
-  getGenerationStatus,
-} from "./services/api";
+  Inter_400Regular,
+  Inter_500Medium,
+  Inter_600SemiBold,
+  Inter_700Bold,
+  Inter_800ExtraBold,
+  useFonts,
+} from "@expo-google-fonts/inter";
+
+import { COLORS, SHADOW } from "./constants/theme";
+import { getQuestions } from "./constants/questions";
+import { Card, FadeIn, NavBar, ProgressBar, Toast, Txt, TYPE } from "./components/kit";
+import HomeScreen, { AppNotification } from "./screens/HomeScreen";
+import RecordScreen from "./screens/RecordScreen";
+import QuestionsScreen from "./screens/QuestionsScreen";
+import ResultScreen from "./screens/ResultScreen";
+import LibraryScreen from "./screens/LibraryScreen";
+import ProfileScreen from "./screens/ProfileScreen";
+import ReadPickScreen from "./screens/ReadPickScreen";
+import VoiceSelectScreen from "./screens/VoiceSelectScreen";
+import PlayerScreen from "./screens/PlayerScreen";
+
+import {
+  BriefApiResponse,
+  CalibrationAnswer,
+  DEFAULT_PREFERENCES,
+  DOCUMENT_OUTPUT_TYPES,
+  DocumentOutputType,
+  ExportDocFormat,
+  ProjectBrief,
+  Screen,
+  SessionDraft,
+  SpokenLanguage,
+  TabId,
+  UserPreferences,
+  UserProfile,
+  VOICES,
+  VoiceProfile,
+} from "./types";
+import { normalizeBrief } from "./utils/normalizeBrief";
+import { buildApiAnswers, buildLocalFallbackBrief } from "./utils/fallbackBrief";
+import { FREE_MONTHLY_LIMIT, countThisMonth } from "./utils/usage";
+import { generateFounderBrief, getGenerationStatus, loginUser } from "./services/api";
 import {
   loadBriefs,
-  saveBriefs,
+  loadPreferences,
   loadProfile,
-  saveProfile,
+  loadRecentVoiceIds,
   loadSessionDraft,
+  saveBriefs,
+  savePreferences,
+  saveProfile,
+  saveRecentVoiceIds,
   saveSessionDraft,
 } from "./services/storage";
+import {
+  initRevenueCat,
+  presentRevenueCatPaywall,
+  restoreRevenueCatPurchases,
+} from "./services/revenuecat";
+
+const PROFILE_PROMPTED_KEY = "founderbrief_profile_prompted_v1";
 
 const LOADING_STEPS = [
-  "Translating startup vision into functional features...",
-  "Drafting business and user goals...",
-  "Building functional requirements and UX flow...",
-  "Writing narrative and success metrics...",
-  "Finalizing milestones and PDF document...",
+  "Understanding your idea",
+  "Writing each section",
+  "Formatting your document",
 ];
 
-const TAB_BAR_HEIGHT = 56;
+const EMPTY_PROFILE: UserProfile = { name: "", email: "", isLoggedIn: false };
+
+interface Reading {
+  title: string;
+  text: string;
+  /** Library document this text came from, if any. */
+  sourceId?: string;
+}
+
+interface NavState {
+  screen: Screen;
+  stack: Screen[];
+}
 
 export default function App() {
+  const [fontsLoaded] = useFonts({
+    Inter_400Regular,
+    Inter_500Medium,
+    Inter_600SemiBold,
+    Inter_700Bold,
+    Inter_800ExtraBold,
+  });
+
   return (
     <SafeAreaProvider>
-      <AppShell />
+      {fontsLoaded ? <AppShell /> : <View style={{ flex: 1, backgroundColor: COLORS.bg }} />}
     </SafeAreaProvider>
   );
 }
 
-function apiToProjectBrief(data: BriefApiResponse, idea: string, answers: BriefAnswers): ProjectBrief {
+function apiToProjectBrief(
+  data: BriefApiResponse,
+  idea: string,
+  answers: ProjectBrief["answers"],
+  documentType: DocumentOutputType,
+  spokenLanguage: SpokenLanguage
+): ProjectBrief {
   return normalizeBrief({
     id: `spec-${Date.now()}`,
     ...data,
     createdAt: new Date().toISOString(),
     originalIdea: idea,
     answers,
+    documentType: data.documentType ?? documentType,
+    spokenLanguage: data.spokenLanguage ?? spokenLanguage,
+    direction: "voice-to-doc",
   });
+}
+
+function titleFromText(text: string): string {
+  const words = text.trim().split(/\s+/);
+  const head = words.slice(0, 6).join(" ");
+  return words.length > 6 ? `${head}…` : head || "Pasted text";
 }
 
 function AppShell() {
   const insets = useSafeAreaInsets();
-  const [activeTab, setActiveTab] = useState<Tab>("Landing");
-  const [idea, setIdea] = useState("");
-  const [sessionAnswers, setSessionAnswers] = useState<BriefAnswers>(DEFAULT_ANSWERS);
-  const [questionStep, setQuestionStep] = useState(0);
-  const [questionnaireActive, setQuestionnaireActive] = useState(false);
-  const [activeBrief, setActiveBrief] = useState<ProjectBrief | null>(null);
-  const [briefs, setBriefs] = useState<ProjectBrief[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
-  const [loadingStep, setLoadingStep] = useState("");
-  const [apiError, setApiError] = useState("");
-  const [backendOk, setBackendOk] = useState<boolean | null>(null);
-  const [userProfile, setUserProfile] = useState<UserProfile>({
-    name: "Founder Guest",
-    email: "founder@founderbrief.app",
-    companyName: "Startup Inc.",
-    isLoggedIn: false,
-    isAdmin: false,
-  });
 
-  const prefetchRef = useRef<Promise<BriefApiResponse> | null>(null);
-  const prefetchIdeaRef = useRef("");
+  /* ---------------- navigation ---------------- */
+  const [nav, setNav] = useState<NavState>({ screen: "Home", stack: [] });
+  const navRef = useRef(nav);
+  navRef.current = nav;
+  const { screen } = nav;
 
-  useEffect(() => {
-    (async () => {
-      setBriefs(await loadBriefs());
-      const p = await loadProfile();
-      if (p) setUserProfile(p);
-
-      const draft = await loadSessionDraft();
-      if (draft?.inProgress && draft.idea) {
-        setIdea(draft.idea);
-        setSessionAnswers(draft.answers);
-        setQuestionStep(draft.step);
-        setQuestionnaireActive(true);
-        setActiveTab("Questions");
-        startPrefetch(draft.idea, p?.authToken);
-      }
-
-      checkBackendHealth().then(setBackendOk).catch(() => setBackendOk(false));
-    })();
-  }, []);
-
-  const startPrefetch = useCallback((ideaText: string, authToken?: string) => {
-    prefetchIdeaRef.current = ideaText;
-    prefetchRef.current = startPrefetchBrief(ideaText, authToken);
-  }, []);
-
-  const persistSession = useCallback(
-    async (partial: Partial<SessionDraft>) => {
-      const draft: SessionDraft = {
-        idea: partial.idea ?? idea,
-        answers: partial.answers ?? sessionAnswers,
-        step: partial.step ?? questionStep,
-        inProgress: partial.inProgress ?? questionnaireActive,
-        updatedAt: new Date().toISOString(),
-      };
-      await saveSessionDraft(draft.inProgress ? draft : null);
-    },
-    [idea, sessionAnswers, questionStep, questionnaireActive]
+  const navigate = useCallback(
+    (next: Screen) => setNav((n) => ({ screen: next, stack: [...n.stack, n.screen] })),
+    []
+  );
+  const resetTo = useCallback(
+    (next: Screen, stack: Screen[] = []) => setNav({ screen: next, stack }),
+    []
+  );
+  const goBack = useCallback(
+    () =>
+      setNav((n) =>
+        n.stack.length
+          ? { screen: n.stack[n.stack.length - 1], stack: n.stack.slice(0, -1) }
+          : { screen: "Home", stack: [] }
+      ),
+    []
   );
 
-  const syncBriefs = async (list: ProjectBrief[]) => {
+  const goTab = useCallback(
+    (tab: TabId) => {
+      switch (tab) {
+        case "Home":
+          return resetTo("Home");
+        case "Record":
+          return resetTo("Record", ["Home"]);
+        case "ReadAloud":
+          return resetTo("ReadPick", ["Home"]);
+        case "Library":
+          return resetTo("Library", ["Home"]);
+        case "Profile":
+          return resetTo("Profile", ["Home"]);
+      }
+    },
+    [resetTo]
+  );
+
+  /* ---------------- data ---------------- */
+  const [briefs, setBriefs] = useState<ProjectBrief[]>([]);
+  const [profile, setProfile] = useState<UserProfile>(EMPTY_PROFILE);
+  const [prefs, setPrefs] = useState<UserPreferences>(DEFAULT_PREFERENCES);
+  const [recentVoiceIds, setRecentVoiceIds] = useState<string[]>([]);
+  const [hydrated, setHydrated] = useState(false);
+  const [promptedProfile, setPromptedProfile] = useState(true);
+
+  /* ---------------- idea / questions ---------------- */
+  const [messages, setMessages] = useState<string[]>([]);
+  const [docType, setDocType] = useState<DocumentOutputType>("PRD");
+  const [language, setLanguage] = useState<SpokenLanguage>("English");
+  const [answers, setAnswers] = useState<string[]>([]);
+  const [questionsKey, setQuestionsKey] = useState(0);
+  const [draftSaved, setDraftSaved] = useState(false);
+
+  /* ---------------- result / reading ---------------- */
+  const [activeBrief, setActiveBrief] = useState<ProjectBrief | null>(null);
+  const [resultFrom, setResultFrom] = useState<"generate" | "library">("library");
+  const [reading, setReading] = useState<Reading | null>(null);
+  const [voice, setVoice] = useState<VoiceProfile | null>(null);
+  const [rate, setRate] = useState(1);
+  const [voiceMode, setVoiceMode] = useState<"read" | "default">("read");
+  const [voiceSelectKey, setVoiceSelectKey] = useState(0);
+
+  /* ---------------- ui ---------------- */
+  const [toast, setToast] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
+  const [loadingStep, setLoadingStep] = useState(0);
+  const [keyboardVisible, setKeyboardVisible] = useState(false);
+
+  const isPro = Boolean(profile.isPro || profile.isAdmin);
+  const documentsThisMonth = useMemo(
+    () => countThisMonth(briefs.filter((b) => b.direction === "voice-to-doc")),
+    [briefs]
+  );
+  const idea = messages.join("\n\n");
+
+  const updateProfile = useCallback((updater: (p: UserProfile) => UserProfile) => {
+    setProfile((prev) => {
+      const next = updater(prev);
+      saveProfile(next.name || next.email || next.isLoggedIn || next.isPro ? next : null);
+      return next;
+    });
+  }, []);
+
+  /* ---------------- startup ---------------- */
+  useEffect(() => {
+    (async () => {
+      const [storedBriefs, storedProfile, storedPrefs, recents, draft, prompted] = await Promise.all([
+        loadBriefs(),
+        loadProfile(),
+        loadPreferences(),
+        loadRecentVoiceIds(),
+        loadSessionDraft(),
+        AsyncStorage.getItem(PROFILE_PROMPTED_KEY),
+      ]);
+      setBriefs(storedBriefs);
+      if (storedProfile) setProfile(storedProfile);
+      setPrefs(storedPrefs);
+      setLanguage(storedPrefs.language);
+      setRecentVoiceIds(recents);
+      setPromptedProfile(prompted === "1");
+
+      if (draft?.inProgress && draft.idea) {
+        setMessages([draft.idea]);
+        setAnswers(draft.calibrationAnswers ?? []);
+        if (draft.documentType) setDocType(draft.documentType);
+        if (draft.spokenLanguage) setLanguage(draft.spokenLanguage);
+        setDraftSaved(true);
+      }
+      setHydrated(true);
+
+      initRevenueCat((hasPro) => {
+        updateProfile((prev) => (prev.isAdmin ? prev : { ...prev, isPro: hasPro }));
+      }).catch(() => undefined);
+    })();
+  }, [updateProfile]);
+
+  /* keyboard + hardware back */
+  useEffect(() => {
+    const show = Keyboard.addListener(Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow", () =>
+      setKeyboardVisible(true)
+    );
+    const hide = Keyboard.addListener(Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide", () =>
+      setKeyboardVisible(false)
+    );
+    return () => {
+      show.remove();
+      hide.remove();
+    };
+  }, []);
+
+  useEffect(() => {
+    const sub = BackHandler.addEventListener("hardwareBackPress", () => {
+      const n = navRef.current;
+      if (n.screen === "Home" && n.stack.length === 0) return false;
+      goBack();
+      return true;
+    });
+    return () => sub.remove();
+  }, [goBack]);
+
+  /* ---------------- helpers ---------------- */
+  const syncBriefs = useCallback(async (list: ProjectBrief[]) => {
     setBriefs(list);
     await saveBriefs(list);
-  };
+  }, []);
 
-  const beginQuestionnaire = async (ideaText: string) => {
-    setIdea(ideaText);
-    setSessionAnswers(DEFAULT_ANSWERS);
-    setQuestionStep(0);
-    setQuestionnaireActive(true);
-    setActiveTab("Questions");
-    setApiError("");
-    await persistSession({ idea: ideaText, answers: DEFAULT_ANSWERS, step: 0, inProgress: true });
-    startPrefetch(ideaText, userProfile.authToken);
-  };
+  const changePrefs = useCallback((next: UserPreferences) => {
+    setPrefs(next);
+    savePreferences(next);
+  }, []);
 
-  const handleQuestionsProgress = (answers: BriefAnswers, step: number) => {
-    setSessionAnswers(answers);
-    setQuestionStep(step);
-    persistSession({ answers, step, inProgress: true });
-  };
+  const launchPaywall = useCallback(async (): Promise<boolean> => {
+    const result = await presentRevenueCatPaywall();
+    if (result.purchased || result.restored) {
+      updateProfile((p) => ({ ...p, isPro: true }));
+      setToast("Welcome to Pro. Everything is unlocked.");
+      return true;
+    }
+    if (!result.nativePaywallShown) {
+      setToast("Upgrades are available in the installed Android or iOS app.");
+    }
+    return false;
+  }, [updateProfile]);
 
-  const handleQuestionsFinished = async (answers: BriefAnswers) => {
+  const persistDraft = useCallback(
+    async (draftAnswers: string[], inProgress = true) => {
+      if (!inProgress) {
+        await saveSessionDraft(null);
+        setDraftSaved(false);
+        return;
+      }
+      const draft: SessionDraft = {
+        idea,
+        calibrationAnswers: draftAnswers,
+        step: draftAnswers.length,
+        inProgress: true,
+        documentType: docType,
+        spokenLanguage: language,
+        updatedAt: new Date().toISOString(),
+      };
+      await saveSessionDraft(draft);
+      setDraftSaved(true);
+    },
+    [idea, docType, language]
+  );
+
+  /* ---------------- generation ---------------- */
+  const runGeneration = async (calibration: CalibrationAnswer[]) => {
+    if (isLoading) return;
+    const ideaText = idea.trim();
+    if (!ideaText) {
+      setToast("Describe your idea first.");
+      return;
+    }
+
     setIsLoading(true);
-    setApiError("");
-
-    let stepIdx = 0;
-    setLoadingStep(LOADING_STEPS[0]);
-    const interval = setInterval(() => {
-      stepIdx++;
-      if (stepIdx < LOADING_STEPS.length) setLoadingStep(LOADING_STEPS[stepIdx]);
-    }, 1500);
+    setLoadingStep(0);
+    const interval = setInterval(() => setLoadingStep((s) => Math.min(s + 1, LOADING_STEPS.length - 1)), 1400);
 
     try {
-      const status = await getGenerationStatus(userProfile.authToken);
-      if (!status.isAdmin && status.remaining === 0) {
-        throw new Error("Free generation limit reached. Log in as admin in Profile for unlimited briefs.");
-      }
-
-      let data: BriefApiResponse;
-
-      const finalPromise = generateFounderBrief(idea, answers, { authToken: userProfile.authToken });
-
-      if (prefetchRef.current && prefetchIdeaRef.current === idea) {
+      if (!isPro && documentsThisMonth >= FREE_MONTHLY_LIMIT) {
+        let allowed = false;
         try {
-          await Promise.race([prefetchRef.current, new Promise((_, rej) => setTimeout(() => rej("timeout"), 500))]);
+          const status = await getGenerationStatus(profile.authToken);
+          allowed = status.isAdmin || status.remaining === null || (status.remaining ?? 0) > 0;
         } catch {
-          /* prefetch still running */
+          allowed = false;
+        }
+        if (!allowed) {
+          const purchased = await launchPaywall();
+          if (!purchased) {
+            setToast(`You've used all ${FREE_MONTHLY_LIMIT} free documents this month. Upgrade to Pro for unlimited.`);
+            return;
+          }
         }
       }
 
-      data = await finalPromise;
+      const apiAnswers = buildApiAnswers(docType, calibration);
+      let data: BriefApiResponse;
+      let offline = false;
+      try {
+        data = await generateFounderBrief(ideaText, apiAnswers, {
+          authToken: profile.authToken,
+          documentType: docType,
+          spokenLanguage: language,
+        });
+      } catch {
+        offline = true;
+        data = buildLocalFallbackBrief(ideaText, apiAnswers, docType, language);
+      }
 
-      const generated = apiToProjectBrief(data, idea, answers);
-      setActiveBrief(generated);
+      const generated = apiToProjectBrief(data, ideaText, apiAnswers, docType, language);
       await syncBriefs([generated, ...briefs]);
-      setQuestionnaireActive(false);
-      await saveSessionDraft(null);
-      prefetchRef.current = null;
-      setActiveTab("Result");
-    } catch (err: unknown) {
-      setApiError(err instanceof Error ? err.message : "Generation failed.");
+      await persistDraft([], false);
+      setActiveBrief(generated);
+      setResultFrom("generate");
+      setMessages([]);
+      setAnswers([]);
+      setQuestionsKey((k) => k + 1);
+      resetTo("Result", ["Home"]);
+      if (offline) {
+        setToast("Couldn't reach the server, so this document was built on your device.");
+      }
+    } catch (err) {
+      setToast(err instanceof Error ? err.message : "Generation failed. Please try again.");
     } finally {
       clearInterval(interval);
       setIsLoading(false);
     }
   };
 
-  const tryLeaveQuestionnaire = (target: Tab) => {
-    if (!questionnaireActive) {
-      setActiveTab(target);
-      return;
-    }
-    Alert.alert(
-      "Complete your brief",
-      "You can't leave the questionnaire until you finish. Your progress is saved on this device.",
-      [{ text: "Continue questionnaire", style: "default" }]
-    );
+  const toCalibration = (list: string[]): CalibrationAnswer[] => {
+    const qs = getQuestions(docType);
+    return list
+      .map((a, i) => ({ question: qs[i], answer: a.trim() }))
+      .filter((x) => x.question && x.answer);
   };
 
+  /* ---------------- reading ---------------- */
+  const openReadFlow = (next: Reading, fallbackLanguage?: SpokenLanguage) => {
+    setReading(next);
+    setVoiceMode("read");
+    setVoiceSelectKey((k) => k + 1);
+    if (fallbackLanguage) setLanguage((l) => l);
+    navigate("VoiceSelect");
+  };
+
+  const confirmVoice = (picked: VoiceProfile) => {
+    if (voiceMode === "default") {
+      changePrefs({ ...prefs, voiceId: picked.id, language: picked.language });
+      setToast(`${picked.name} is now your default voice.`);
+      goBack();
+      return;
+    }
+    const ids = [picked.id, ...recentVoiceIds.filter((id) => id !== picked.id)].slice(0, 3);
+    setRecentVoiceIds(ids);
+    saveRecentVoiceIds(ids);
+    changePrefs({ ...prefs, voiceId: picked.id });
+    setVoice(picked);
+    navigate("Player");
+  };
+
+  const saveAudio = async (durationSec: number) => {
+    if (!reading || !voice) return;
+    const exists = briefs.some(
+      (b) =>
+        b.direction === "doc-to-voice" &&
+        b.title === reading.title &&
+        b.voiceId === voice.id &&
+        b.documentMarkdown === `# ${reading.title}\n\n${reading.text}`
+    );
+    if (exists) {
+      setToast("Already saved in your Library.");
+      return;
+    }
+    const item = normalizeBrief({
+      id: `audio-${Date.now()}`,
+      title: reading.title,
+      tldr: reading.text.slice(0, 220),
+      description: reading.text,
+      originalIdea: reading.text,
+      documentMarkdown: `# ${reading.title}\n\n${reading.text}`,
+      documentType: "Generic Brief",
+      direction: "doc-to-voice",
+      spokenLanguage: voice.language,
+      voiceId: voice.id,
+      playbackSpeed: rate,
+      audioFormat: prefs.audioFormat,
+      durationSec,
+      createdAt: new Date().toISOString(),
+    });
+    await syncBriefs([item, ...briefs]);
+    setToast("Saved to your Library.");
+  };
+
+  /* ---------------- library ---------------- */
+  const openLibraryItem = (b: ProjectBrief) => {
+    if (b.direction === "doc-to-voice") {
+      const savedVoice = VOICES.find((v) => v.id === b.voiceId) ?? VOICES.find((v) => v.language === b.spokenLanguage);
+      if (!savedVoice) {
+        setToast("This voice isn't available anymore.");
+        return;
+      }
+      setReading({
+        title: b.title,
+        text: b.documentMarkdown.replace(/^#\s.*\n+/, ""),
+      });
+      setVoice(savedVoice);
+      setRate(b.playbackSpeed ?? 1);
+      navigate("Player");
+      return;
+    }
+    setActiveBrief(b);
+    setResultFrom("library");
+    navigate("Result");
+  };
+
+  const readLibraryDoc = (b: ProjectBrief) => {
+    openReadFlow({ title: b.title, text: b.documentMarkdown, sourceId: b.id });
+  };
+
+  const deleteBrief = async (b: ProjectBrief) => {
+    await syncBriefs(briefs.filter((x) => x.id !== b.id));
+    if (activeBrief?.id === b.id) setActiveBrief(null);
+    setToast("Deleted from your Library.");
+  };
+
+  /* ---------------- profile ---------------- */
+  const markPrompted = useCallback(() => {
+    setPromptedProfile(true);
+    AsyncStorage.setItem(PROFILE_PROMPTED_KEY, "1");
+  }, []);
+
+  const saveProfileDetails = (name: string, email: string) => {
+    updateProfile((p) => ({ ...p, name, email }));
+    markPrompted();
+  };
+
+  const signIn = async (email: string, password: string) => {
+    const res = await loginUser(email, password);
+    updateProfile((p) => ({
+      ...p,
+      name: res.name || p.name,
+      email: res.email,
+      isLoggedIn: true,
+      isAdmin: res.isAdmin,
+      isPro: res.isAdmin ? true : p.isPro,
+      authToken: res.token,
+    }));
+    markPrompted();
+    setToast(res.isAdmin ? "Signed in as admin." : "Signed in.");
+  };
+
+  const logout = () => {
+    updateProfile((p) => ({
+      name: p.name,
+      email: p.email,
+      avatarUrl: p.avatarUrl,
+      isLoggedIn: false,
+      isPro: p.isAdmin ? false : p.isPro,
+    }));
+    setToast("Logged out.");
+  };
+
+  const restorePurchases = async () => {
+    const res = await restoreRevenueCatPurchases();
+    if (res.isPro) {
+      updateProfile((p) => ({ ...p, isPro: true }));
+      setToast("Pro restored.");
+    } else if (!res.nativeSupported) {
+      setToast("Restoring purchases works in the installed Android or iOS app.");
+    } else {
+      setToast(res.errorMessage ?? "No active subscription found for this account.");
+    }
+  };
+
+  const manageSubscription = () => {
+    const url =
+      Platform.OS === "ios"
+        ? "https://apps.apple.com/account/subscriptions"
+        : "https://play.google.com/store/account/subscriptions";
+    Linking.openURL(url).catch(() => setToast("Couldn't open subscription settings."));
+  };
+
+  const clearAllData = async () => {
+    await Promise.all([
+      saveBriefs([]),
+      saveProfile(null),
+      savePreferences(DEFAULT_PREFERENCES),
+      saveRecentVoiceIds([]),
+      saveSessionDraft(null),
+      AsyncStorage.removeItem(PROFILE_PROMPTED_KEY),
+    ]);
+    setBriefs([]);
+    setProfile(EMPTY_PROFILE);
+    setPrefs(DEFAULT_PREFERENCES);
+    setLanguage(DEFAULT_PREFERENCES.language);
+    setRecentVoiceIds([]);
+    setMessages([]);
+    setAnswers([]);
+    setDraftSaved(false);
+    setPromptedProfile(false);
+    setToast("Local data cleared.");
+    resetTo("Home");
+  };
+
+  /* ---------------- notifications ---------------- */
+  const notifications: AppNotification[] = [];
+  if (draftSaved && messages.length > 0) {
+    const typeLabel = DOCUMENT_OUTPUT_TYPES.find((d) => d.id === docType)?.barLabel ?? "document";
+    notifications.push({
+      id: "draft",
+      title: `Resume your ${typeLabel}`,
+      subtitle: `${answers.length} of ${getQuestions(docType).length} questions answered`,
+      onPress: () => resetTo("Questions", ["Home", "Record"]),
+    });
+  }
+  if (!isPro && documentsThisMonth >= FREE_MONTHLY_LIMIT - 1) {
+    notifications.push({
+      id: "usage",
+      title:
+        documentsThisMonth >= FREE_MONTHLY_LIMIT
+          ? "Free documents used up"
+          : "One free document left",
+      subtitle: `${documentsThisMonth} of ${FREE_MONTHLY_LIMIT} used this month`,
+      onPress: () => goTab("Profile"),
+    });
+  }
+
+  /* ---------------- render ---------------- */
+  const activeTab: TabId = (() => {
+    switch (screen) {
+      case "Home":
+        return "Home";
+      case "Record":
+      case "Questions":
+        return "Record";
+      case "Result":
+        return resultFrom === "generate" ? "Record" : "Library";
+      case "ReadPick":
+      case "Player":
+        return "ReadAloud";
+      case "VoiceSelect":
+        return voiceMode === "default" ? "Profile" : "ReadAloud";
+      case "Library":
+        return "Library";
+      case "Profile":
+        return "Profile";
+    }
+  })();
+
+  const showNav = screen !== "Questions" && !keyboardVisible;
+
   const renderScreen = () => {
-    switch (activeTab) {
-      case "Input":
+    switch (screen) {
+      case "Home":
         return (
-          <DescribeIdeaScreen
-            initialIdea={idea}
-            onContinue={beginQuestionnaire}
-            onBack={() => setActiveTab("Landing")}
+          <HomeScreen
+            name={profile.name}
+            notifications={notifications}
+            needsProfile={hydrated && !promptedProfile && !profile.name}
+            onSaveProfile={saveProfileDetails}
+            onSkipProfile={markPrompted}
+            onNavigate={goTab}
           />
         );
+
+      case "Record":
+        return (
+          <RecordScreen
+            messages={messages}
+            docType={docType}
+            language={language}
+            onChangeDocType={setDocType}
+            onChangeLanguage={setLanguage}
+            onAddMessage={(t) => setMessages((m) => [...m, t])}
+            onClear={() => {
+              setMessages([]);
+              setAnswers([]);
+              persistDraft([], false);
+            }}
+            onCreateNow={() => runGeneration([])}
+            onAnswerQuestions={() => {
+              setAnswers([]);
+              setQuestionsKey((k) => k + 1);
+              persistDraft([]);
+              navigate("Questions");
+            }}
+            onBack={goBack}
+          />
+        );
+
       case "Questions":
         return (
           <QuestionsScreen
-            initialAnswers={sessionAnswers}
-            initialStep={questionStep}
-            onFinish={handleQuestionsFinished}
-            onProgress={handleQuestionsProgress}
+            key={questionsKey}
+            docType={docType}
+            initialAnswers={answers}
+            onProgress={(a) => {
+              setAnswers(a);
+              persistDraft(a);
+            }}
+            onFinish={(a) => runGeneration(toCalibration(a))}
+            onGenerateNow={(a) => runGeneration(toCalibration(a))}
+            onRestart={() => {
+              setAnswers([]);
+              setQuestionsKey((k) => k + 1);
+              persistDraft([]);
+            }}
+            onBack={goBack}
+            onNotice={setToast}
           />
         );
+
       case "Result":
         return activeBrief ? (
-          <BriefResultScreen
+          <ResultScreen
+            key={activeBrief.id}
             brief={activeBrief}
-            onRestart={async () => {
-              setIdea("");
-              setActiveBrief(null);
-              setQuestionnaireActive(false);
-              await saveSessionDraft(null);
-              setActiveTab("Input");
+            defaultFormat={prefs.docFormat}
+            onExported={(format: ExportDocFormat) => {
+              if (format !== prefs.docFormat) changePrefs({ ...prefs, docFormat: format });
             }}
+            onReadAloud={() =>
+              openReadFlow({
+                title: activeBrief.title,
+                text: activeBrief.documentMarkdown,
+                sourceId: activeBrief.id,
+              })
+            }
+            onDelete={async () => {
+              await deleteBrief(activeBrief);
+              goBack();
+            }}
+            onBack={goBack}
+            onNotice={setToast}
           />
-        ) : (
-          <LandingScreen
-            bottomInset={insets.bottom}
-            onGetStarted={() => setActiveTab("Input")}
-            onSignIn={() => setActiveTab("Profile")}
-            onSelectTemplate={(t) => beginQuestionnaire(t)}
-          />
-        );
-      case "History":
+        ) : null;
+
+      case "ReadPick":
         return (
-          <BriefHistoryScreen
-            bottomInset={insets.bottom}
+          <ReadPickScreen
             briefs={briefs}
-            onSelectBrief={(b) => {
-              setActiveBrief(b);
-              setIdea(b.originalIdea);
-              setActiveTab("Result");
-            }}
-            onDeleteBrief={async (id) => {
-              const updated = briefs.filter((b) => b.id !== id);
-              await syncBriefs(updated);
-              if (activeBrief?.id === id) setActiveBrief(null);
-            }}
-            onNewBrief={() => {
-              setIdea("");
-              setActiveTab("Input");
+            onBack={goBack}
+            onChoose={(title, text, source) => {
+              if (source) setLanguage(source.spokenLanguage);
+              openReadFlow({
+                title: title === "Pasted text" ? titleFromText(text) : title,
+                text,
+                sourceId: source?.id,
+              });
             }}
           />
         );
+
+      case "VoiceSelect":
+        return (
+          <VoiceSelectScreen
+            key={voiceSelectKey}
+            isPro={isPro}
+            initialLanguage={VOICES.find((v) => v.id === prefs.voiceId)?.language ?? language}
+            selectedId={prefs.voiceId}
+            recentIds={recentVoiceIds}
+            onConfirm={confirmVoice}
+            onClose={goBack}
+            onUpgrade={() => {
+              launchPaywall();
+            }}
+          />
+        );
+
+      case "Player":
+        return reading && voice ? (
+          <PlayerScreen
+            key={`${reading.title}-${voice.id}`}
+            title={reading.title}
+            text={reading.text}
+            voice={voice}
+            rate={rate}
+            onRateChange={setRate}
+            onSave={saveAudio}
+            onBack={goBack}
+          />
+        ) : null;
+
+      case "Library":
+        return (
+          <LibraryScreen
+            briefs={briefs}
+            onOpen={openLibraryItem}
+            onReadAloud={readLibraryDoc}
+            onDelete={deleteBrief}
+            onRecord={() => goTab("Record")}
+          />
+        );
+
       case "Profile":
         return (
           <ProfileScreen
-            bottomInset={insets.bottom}
-            profile={userProfile}
-            savedBriefsCount={briefs.length}
-            briefs={briefs}
-            onAuthChanged={async (p) => {
-              setUserProfile(p);
-              await saveProfile(p);
+            profile={profile}
+            isPro={isPro}
+            usage={{ used: documentsThisMonth, limit: isPro ? null : FREE_MONTHLY_LIMIT }}
+            prefs={prefs}
+            onPrefsChange={(next) => {
+              changePrefs(next);
+              setLanguage(next.language);
             }}
-          />
-        );
-      default:
-        return (
-          <LandingScreen
-            bottomInset={insets.bottom}
-            onGetStarted={() => {
-              setApiError("");
-              setActiveTab("Input");
+            onSaveProfile={saveProfileDetails}
+            onSignIn={signIn}
+            onLogout={logout}
+            onUpgrade={() => {
+              launchPaywall();
             }}
-            onSignIn={() => setActiveTab("Profile")}
-            onSelectTemplate={(t) => beginQuestionnaire(t)}
+            onManageSubscription={manageSubscription}
+            onRestore={restorePurchases}
+            onOpenVoiceSettings={() => {
+              setVoiceMode("default");
+              setVoiceSelectKey((k) => k + 1);
+              navigate("VoiceSelect");
+            }}
+            onClearData={clearAllData}
+            onToggleSandboxPro={
+              __DEV__ && !profile.isAdmin
+                ? () => updateProfile((p) => ({ ...p, isPro: !p.isPro }))
+                : undefined
+            }
           />
         );
     }
   };
 
-  const isHomeTab = activeTab === "Landing" || activeTab === "Input" || activeTab === "Result";
+  const typeLabel = DOCUMENT_OUTPUT_TYPES.find((d) => d.id === docType)?.barLabel ?? "document";
 
   return (
     <View style={styles.root}>
-      <StatusBar style="dark" translucent backgroundColor="transparent" />
-
-      <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
-        <Pressable
-          style={styles.brandRow}
-          onPress={() => (questionnaireActive ? tryLeaveQuestionnaire("Landing") : setActiveTab("Landing"))}
-        >
-          <Text style={styles.brandIcon}>⌘</Text>
-          <Text style={styles.brand}>FounderBrief</Text>
-        </Pressable>
-        <Pressable style={styles.avatar} onPress={() => tryLeaveQuestionnaire("Profile")} hitSlop={12}>
-          <Text style={styles.avatarText}>{userProfile.name.charAt(0).toUpperCase()}</Text>
-        </Pressable>
-      </View>
-
-      {backendOk === false && (
-        <View style={styles.warn}>
-          <Text style={styles.warnText}>
-            Cannot reach server at {getApiBaseUrl()}. Ensure npm run dev is running and EXPO_PUBLIC_API_URL uses your PC IP.
-          </Text>
-        </View>
-      )}
-
-      {apiError ? (
-        <View style={styles.error}>
-          <Text style={styles.errorTitle}>Brief Generation Hindered</Text>
-          <Text style={styles.errorText}>{apiError}</Text>
-          <Pressable onPress={() => setApiError("")}>
-            <Text style={styles.dismiss}>Dismiss</Text>
-          </Pressable>
-        </View>
-      ) : null}
-
-      <View style={styles.main}>{renderScreen()}</View>
+      <StatusBar hidden={screen !== "Home"} style="dark" />
 
       <View
-        style={[
-          styles.tabBar,
-          {
-            paddingBottom: Math.max(insets.bottom, 10),
-            height: TAB_BAR_HEIGHT + Math.max(insets.bottom, 10),
-          },
-        ]}
+        style={{
+          flex: 1,
+          paddingBottom: showNav || keyboardVisible ? 0 : Math.max(insets.bottom, 10),
+        }}
       >
-        {[
-          {
-            id: "home",
-            label: "Home",
-            active: isHomeTab,
-            onPress: () =>
-              questionnaireActive
-                ? tryLeaveQuestionnaire(activeBrief ? "Result" : "Landing")
-                : setActiveTab(activeBrief ? "Result" : "Landing"),
-          },
-          {
-            id: "questions",
-            label: "Questions",
-            active: activeTab === "Questions",
-            onPress: () =>
-              questionnaireActive
-                ? setActiveTab("Questions")
-                : setActiveTab(idea ? "Questions" : "Input"),
-          },
-          {
-            id: "briefs",
-            label: "Briefs",
-            active: activeTab === "History",
-            onPress: () => tryLeaveQuestionnaire("History"),
-          },
-          {
-            id: "profile",
-            label: "Profile",
-            active: activeTab === "Profile",
-            onPress: () => tryLeaveQuestionnaire("Profile"),
-          },
-        ].map((tab) => (
-          <Pressable key={tab.id} style={styles.tab} onPress={tab.onPress}>
-            <Text style={[styles.tabIcon, tab.active && styles.tabActive]}>
-              {tab.id === "home" ? "⌂" : tab.id === "questions" ? "?" : tab.id === "briefs" ? "📄" : "👤"}
-            </Text>
-            <Text style={[styles.tabLabel, tab.active && styles.tabActive]}>{tab.label}</Text>
-          </Pressable>
-        ))}
+        <FadeIn triggerKey={screen}>{renderScreen()}</FadeIn>
+
+        {isLoading ? (
+          <View style={styles.loadingOverlay} pointerEvents="auto">
+            <Card style={styles.loadingCard}>
+              <ActivityIndicator color={COLORS.ink} />
+              <Txt style={[TYPE.title, { marginTop: 16, textAlign: "center" }]}>
+                {`Creating your ${typeLabel}`}
+              </Txt>
+              <Txt style={[TYPE.body, { color: COLORS.inkMuted, marginTop: 6, textAlign: "center" }]}>
+                {LOADING_STEPS[loadingStep]}
+              </Txt>
+              <ProgressBar
+                progress={(loadingStep + 1) / LOADING_STEPS.length}
+                height={10}
+                style={{ alignSelf: "stretch", marginTop: 18 }}
+              />
+            </Card>
+          </View>
+        ) : null}
       </View>
 
-      <Modal visible={isLoading} transparent animationType="fade">
-        <View style={styles.loadingOverlay}>
-          <ActivityIndicator size="large" color={COLORS.accent} />
-          <Text style={styles.loadingTitle}>Generating your Blueprint...</Text>
-          <Text style={styles.loadingStep}>{loadingStep}</Text>
-          <Text style={styles.powered}>✦ Powered by Google Gemini</Text>
-        </View>
-      </Modal>
+      {showNav ? (
+        <NavBar
+          active={activeTab}
+          bottomInset={insets.bottom}
+          onSelect={(tab) => {
+            if (!isLoading) goTab(tab);
+          }}
+        />
+      ) : null}
+
+      <Toast message={toast} onClose={() => setToast("")} />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: COLORS.bg },
-  header: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingHorizontal: 16,
-    paddingBottom: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.border,
-    backgroundColor: COLORS.bg,
-  },
-  brandRow: { flexDirection: "row", alignItems: "center", gap: 8 },
-  brandIcon: { fontSize: 18, color: COLORS.text },
-  brand: { fontSize: 20, fontWeight: "900", color: COLORS.text },
-  avatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: COLORS.text,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  avatarText: { color: COLORS.bg, fontWeight: "800", fontSize: 15 },
-  warn: { backgroundColor: "#FEF3C7", padding: 10, marginHorizontal: 16, marginTop: 8, borderRadius: 8 },
-  warnText: { fontSize: 11, color: "#92400E", lineHeight: 16 },
-  error: {
-    margin: 16,
-    marginBottom: 0,
-    padding: 14,
-    backgroundColor: "#FEF2F2",
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: "#FECACA",
-  },
-  errorTitle: { fontWeight: "800", fontSize: 12, color: "#B91C1C", marginBottom: 4 },
-  errorText: { fontSize: 12, color: "#B91C1C" },
-  dismiss: { fontSize: 10, fontWeight: "800", color: "#B91C1C", marginTop: 8 },
-  main: { flex: 1 },
-  tabBar: {
-    flexDirection: "row",
-    borderTopWidth: 1,
-    borderTopColor: COLORS.border,
-    backgroundColor: COLORS.bg,
-  },
-  tab: { flex: 1, alignItems: "center", justifyContent: "center", paddingTop: 6 },
-  tabIcon: { fontSize: 18, color: COLORS.textMuted },
-  tabLabel: { fontSize: 10, fontWeight: "600", color: COLORS.textMuted, marginTop: 2 },
-  tabActive: { color: COLORS.accent, fontWeight: "800" },
   loadingOverlay: {
-    flex: 1,
-    backgroundColor: "rgba(250,248,245,0.95)",
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: COLORS.scrim,
     alignItems: "center",
     justifyContent: "center",
-    padding: 32,
+    padding: 28,
   },
-  loadingTitle: { fontSize: 18, fontWeight: "900", color: COLORS.text, marginTop: 20 },
-  loadingStep: { fontSize: 12, color: COLORS.textMuted, textAlign: "center", marginTop: 10 },
-  powered: { fontSize: 10, color: COLORS.textDim, marginTop: 40, fontWeight: "700" },
+  loadingCard: { alignSelf: "stretch", alignItems: "center", paddingVertical: 28, ...SHADOW },
 });

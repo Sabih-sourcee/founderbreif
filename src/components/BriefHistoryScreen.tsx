@@ -1,136 +1,321 @@
-import React, { useState } from "react";
-import { motion } from "motion/react";
-import { ProjectBrief } from "../types";
-import { Plus, FolderOpen, Eye, Trash2 } from "lucide-react";
+import React, { useState, useMemo } from "react";
+import {
+  Trash2,
+  Plus,
+  Volume2,
+  FileText,
+  Search,
+  ArrowUpDown,
+} from "lucide-react";
+import { DocumentOutputType, ProjectBrief } from "../types";
 
 interface BriefHistoryScreenProps {
   briefs: ProjectBrief[];
   onSelectBrief: (brief: ProjectBrief) => void;
-  onDeleteBrief: (id: string) => void;
+  onOpenReadAloudItem?: (brief: ProjectBrief) => void;
+  onDeleteBrief: (id: string, e: React.MouseEvent) => void;
+  onRestoreBriefs?: (briefs: ProjectBrief[]) => void;
   onNewBrief: () => void;
+  onNewReadAloud?: () => void;
 }
 
-export default function BriefHistoryScreen({
+export const BriefHistoryScreen: React.FC<BriefHistoryScreenProps> = ({
   briefs,
   onSelectBrief,
+  onOpenReadAloudItem,
   onDeleteBrief,
-  onNewBrief
-}: BriefHistoryScreenProps) {
-  const [filter, setFilter] = useState<"All" | "Low" | "Medium" | "High">("All");
+  onRestoreBriefs,
+  onNewBrief,
+  onNewReadAloud,
+}) => {
+  const [directionFilter, setDirectionFilter] = useState<
+    "All" | "voice-to-doc" | "doc-to-voice"
+  >("All");
+  const [docTypeFilter, setDocTypeFilter] = useState<"All" | DocumentOutputType>("All");
+  const [sortOrder, setSortOrder] = useState<"newest" | "title">("newest");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [pendingUndo, setPendingUndo] = useState<{
+    item: ProjectBrief;
+    snapshot: ProjectBrief[];
+  } | null>(null);
 
-  const filteredBriefs = briefs.filter((b) => {
-    if (filter === "All") return true;
-    return b.complexity === filter;
-  });
+  const counts = useMemo(() => {
+    const voiceDocs = briefs.filter(
+      (b) => (b.direction || "voice-to-doc") === "voice-to-doc"
+    ).length;
+    const audioReads = briefs.filter((b) => b.direction === "doc-to-voice").length;
+    return {
+      All: briefs.length,
+      "voice-to-doc": voiceDocs,
+      "doc-to-voice": audioReads,
+    };
+  }, [briefs]);
+
+  const filtered = useMemo(() => {
+    const list = briefs.filter((b) => {
+      const dir = b.direction || "voice-to-doc";
+      if (directionFilter !== "All" && dir !== directionFilter) return false;
+      if (docTypeFilter !== "All" && (b.documentType || "PRD") !== docTypeFilter)
+        return false;
+      if (searchQuery.trim()) {
+        const q = searchQuery.toLowerCase();
+        return (
+          b.title.toLowerCase().includes(q) ||
+          b.description.toLowerCase().includes(q)
+        );
+      }
+      return true;
+    });
+
+    if (sortOrder === "title") {
+      return [...list].sort((a, b) => a.title.localeCompare(b.title));
+    }
+    return list;
+  }, [briefs, directionFilter, docTypeFilter, searchQuery, sortOrder]);
+
+  const handleDeleteWithUndo = (b: ProjectBrief, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const snapshot = [...briefs];
+    setPendingUndo({ item: b, snapshot });
+    onDeleteBrief(b.id, e);
+  };
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 10 }}
-      animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0 }}
-      className="flex-grow flex flex-col justify-start px-4 sm:px-6 pt-6 pb-24 max-w-2xl mx-auto w-full font-sans text-left"
-    >
-      <div className="flex items-center justify-between mb-6">
+    <div className="w-full max-w-4xl mx-auto px-4 sm:px-6 pt-6 pb-24">
+      <div className="flex flex-wrap items-start justify-between gap-4 mb-6">
         <div>
-          <h1 className="text-xl sm:text-2xl font-extrabold text-[#1A1A1A] tracking-tight">Your Brief Archive</h1>
-          <p className="text-xs text-[#444748] mt-1">Historically compiled technical startup briefs.</p>
+          <span className="inline-block font-mono text-[10px] font-extrabold bg-white text-[#1C2120] px-3 py-1 rounded-full fb-bubble-shadow mb-2">
+            VOZIFY + TINREC UNIFIED ARCHIVE
+          </span>
+          <h1 className="text-3xl sm:text-4xl font-extrabold text-[#1C2120] tracking-tight">
+            Shared Library
+          </h1>
+          <p className="text-sm text-[#323B39] mt-1">
+            All generated documents (Voice → Doc) and Read Aloud items (Doc → Voice).
+          </p>
         </div>
+
         <button
+          type="button"
           onClick={onNewBrief}
-          className="px-3 py-2 bg-[#E07B39] text-[#FAF8F5] text-xs font-bold rounded-lg flex items-center gap-1 hover:opacity-95 cursor-pointer shadow-sm"
+          className="fb-interactive fb-pill-shadow inline-flex items-center gap-2 bg-[#FBFF28] text-[#1C2120] font-extrabold text-xs sm:text-sm px-5 py-3 rounded-full"
         >
-          <Plus className="w-3.5 h-3.5" />
-          <span>Draft New</span>
+          <Plus className="w-4 h-4" />
+          New Voice Doc
         </button>
       </div>
 
-      {/* Filter Segment togglers */}
-      <div className="flex items-center gap-1.5 mb-6 overflow-x-auto pb-1 no-print">
-        {(["All", "Low", "Medium", "High"] as const).map((lvl) => (
-          <button
-            key={lvl}
-            onClick={() => setFilter(lvl)}
-            className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-all cursor-pointer whitespace-nowrap ${
-              filter === lvl
-                ? "bg-[#1A1A1A] border-[#1A1A1A] text-[#FAF8F5] font-bold"
-                : "bg-[#F2EEE8] border-[#E5DDD3] text-[#444748] hover:bg-[#E5DDD3]/50"
-            }`}
-          >
-            {lvl} Complexity
-          </button>
-        ))}
+      {/* Search & Sort Row */}
+      <div className="flex gap-3 mb-4">
+        <div className="flex-1 relative">
+          <Search className="w-4 h-4 text-[#5A6966] absolute left-4 top-1/2 -translate-y-1/2" />
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Search PRDs, Business Plans, Resumes, Audio Reads…"
+            className="w-full bg-white text-[#1C2120] text-sm rounded-full pl-11 pr-4 py-3 fb-bubble-shadow focus:outline-none"
+          />
+        </div>
+        <button
+          type="button"
+          onClick={() =>
+            setSortOrder((s) => (s === "newest" ? "title" : "newest"))
+          }
+          className="fb-interactive inline-flex items-center gap-2 bg-[#1C2120] text-[#FBFF28] font-mono text-xs font-extrabold px-4 py-3 rounded-full"
+        >
+          <ArrowUpDown className="w-3.5 h-3.5" />
+          {sortOrder === "newest" ? "Newest" : "A–Z"}
+        </button>
       </div>
 
-      {/* List content area */}
-      <div className="space-y-4">
-        {filteredBriefs.length === 0 ? (
-          <div className="p-8 border border-dashed border-[#E5DDD3] rounded-2xl flex flex-col items-center text-center gap-2 bg-[#FAF8F5]/30">
-            <FolderOpen className="w-10 h-10 text-[#747878] mb-1" />
-            <p className="text-sm font-semibold text-[#1A1A1A]">No archived specifications found</p>
-            <p className="text-xs text-[#444748] max-w-xs leading-relaxed font-normal">
-              Compile your first startup vision concept answers to forge a durable PDF brief!
-            </p>
+      {/* Direction Filter Chips */}
+      <div className="flex flex-wrap gap-2 mb-3">
+        {(
+          [
+            { id: "All", label: `All (${counts.All})` },
+            { id: "voice-to-doc", label: `Voice → Doc (${counts["voice-to-doc"]})` },
+            { id: "doc-to-voice", label: `Read Aloud (${counts["doc-to-voice"]})` },
+          ] as const
+        ).map((tab) => {
+          const active = directionFilter === tab.id;
+          return (
             <button
-              onClick={onNewBrief}
-              className="mt-2 text-xs font-bold text-[#E07B39] underline hover:text-[#1A1A1A] cursor-pointer"
+              key={tab.id}
+              type="button"
+              onClick={() => setDirectionFilter(tab.id)}
+              className={`fb-interactive px-4 py-2 rounded-full text-xs font-extrabold ${
+                active
+                  ? "bg-[#1C2120] text-[#FBFF28] fb-dark-bubble-shadow"
+                  : "bg-white text-[#1C2120] fb-bubble-shadow"
+              }`}
             >
-              Start Onboarding Questionnaire
+              {tab.label}
             </button>
-          </div>
-        ) : (
-          filteredBriefs.map((b) => (
-            <motion.div
-              key={b.id}
-              whileHover={{ scale: 1.01 }}
-              className="p-4 sm:p-5 bg-[#F2EEE8] border border-[#E5DDD3] rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-4 cursor-pointer hover:border-[#1A1A1A]/30 transition-all shadow-sm text-left"
+          );
+        })}
+      </div>
+
+      {/* Document Type Filter Chips */}
+      <div className="flex flex-wrap gap-2 mb-6">
+        {(
+          [
+            "All",
+            "PRD",
+            "Business Plan",
+            "Resume",
+            "Pitch Deck Outline",
+            "Generic Brief",
+          ] as const
+        ).map((dt) => {
+          const active = docTypeFilter === dt;
+          return (
+            <button
+              key={dt}
+              type="button"
+              onClick={() => setDocTypeFilter(dt)}
+              className={`fb-interactive px-3.5 py-1.5 rounded-full text-xs font-extrabold ${
+                active
+                  ? "bg-[#FBFF28] text-[#1C2120] fb-pill-shadow"
+                  : "bg-white/70 text-[#323B39]"
+              }`}
             >
-              {/* Info column */}
-              <div onClick={() => onSelectBrief(b)} className="space-y-1.5 flex-1 select-none text-left">
-                <div className="flex items-center gap-2 flex-wrap text-left">
-                  <span className="text-[9px] font-mono font-bold bg-[#E5DDD3] text-[#444748] px-2 py-0.5 rounded-full uppercase">
-                    {b.answers?.platform || 'Both'}
-                  </span>
-                  <span className={`text-[9px] font-mono font-bold px-2 py-0.5 rounded-full uppercase ${
-                    b.complexity === "High" ? "bg-red-100 text-red-700" : b.complexity === "Low" ? "bg-green-100 text-green-700" : "bg-orange-100 text-orange-700"
-                  }`}>
-                    {b.complexity} Complexity
-                  </span>
-                  <span className="text-[10px] text-[#747878] font-mono">
-                    {new Date(b.createdAt).toLocaleDateString()}
+              {dt}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Undo Banner */}
+      {pendingUndo ? (
+        <div className="bg-[#1C2120] text-white rounded-full px-5 py-3 mb-5 fb-dark-bubble-shadow flex items-center justify-between">
+          <span className="text-xs font-bold truncate">
+            Removed “{pendingUndo.item.title}”
+          </span>
+          <button
+            type="button"
+            onClick={() => {
+              onRestoreBriefs?.(pendingUndo.snapshot);
+              setPendingUndo(null);
+            }}
+            className="fb-interactive bg-[#FBFF28] text-[#1C2120] font-extrabold text-xs px-4 py-1.5 rounded-full"
+          >
+            Undo
+          </button>
+        </div>
+      ) : null}
+
+      {/* Items List */}
+      {filtered.length === 0 ? (
+        <div className="bg-white rounded-[34px] p-10 text-center fb-bubble-shadow">
+          <div className="w-14 h-14 rounded-full bg-[#DAF7F3] text-[#1C2120] flex items-center justify-center mx-auto mb-4">
+            <FileText className="w-6 h-6" />
+          </div>
+          <h3 className="text-xl font-extrabold text-[#1C2120] mb-2">
+            Your Unified Library is empty
+          </h3>
+          <p className="text-sm text-[#4A5754] max-w-md mx-auto mb-6">
+            Record a voice note to generate a PRD, Business Plan, Resume, or Pitch Deck — or import a document for Read Aloud.
+          </p>
+          <div className="flex flex-wrap justify-center gap-3">
+            <button
+              type="button"
+              onClick={onNewBrief}
+              className="fb-interactive fb-pill-shadow bg-[#FBFF28] text-[#1C2120] font-extrabold text-xs px-6 py-3.5 rounded-full"
+            >
+              Record Voice → Doc
+            </button>
+            {onNewReadAloud ? (
+              <button
+                type="button"
+                onClick={onNewReadAloud}
+                className="fb-interactive bg-[#DAF7F3] text-[#1C2120] font-extrabold text-xs px-6 py-3.5 rounded-full"
+              >
+                Open Read Aloud →
+              </button>
+            ) : null}
+          </div>
+        </div>
+      ) : (
+        <div className="space-y-4">
+          {filtered.map((b) => {
+            const isAudioRead = b.direction === "doc-to-voice";
+            const docType = b.documentType || "PRD";
+            const lang = b.spokenLanguage || "Urdu";
+
+            return (
+              <div
+                key={b.id}
+                onClick={() =>
+                  isAudioRead && onOpenReadAloudItem
+                    ? onOpenReadAloudItem(b)
+                    : onSelectBrief(b)
+                }
+                className="fb-interactive cursor-pointer bg-white rounded-[28px] p-6 fb-bubble-shadow"
+              >
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-2">
+                    <span
+                      className={`font-mono text-[10px] font-extrabold px-3 py-1 rounded-full ${
+                        isAudioRead
+                          ? "bg-[#1C2120] text-[#FBFF28]"
+                          : "bg-[#FBFF28] text-[#1C2120]"
+                      }`}
+                    >
+                      {isAudioRead ? "🔊 DOC → VOICE" : `📄 ${docType.toUpperCase()}`}
+                    </span>
+                    <span className="font-mono text-[10px] font-bold bg-[#DAF7F3] text-[#1C2120] px-2.5 py-1 rounded-full">
+                      {lang}
+                    </span>
+                  </div>
+                  <span className="font-mono text-xs text-[#5A6966]">
+                    {b.createdAt}
                   </span>
                 </div>
-                <h3 className="text-base font-extrabold text-[#1A1A1A] tracking-tight leading-tight">{b.title}</h3>
-                <p className="text-xs text-[#444748] line-clamp-2 leading-relaxed font-normal">
+
+                <h3 className="text-lg sm:text-xl font-extrabold text-[#1C2120] mb-1">
+                  {b.title}
+                </h3>
+                <p className="text-sm text-[#4A5754] line-clamp-2 mb-4">
                   {b.description}
                 </p>
-              </div>
 
-              {/* Action column */}
-              <div className="flex items-center gap-2 border-t sm:border-t-0 border-[#E5DDD3]/60 pt-3 sm:pt-0 justify-end shrink-0">
-                <button
-                  onClick={() => onSelectBrief(b)}
-                  className="px-3.5 h-10 bg-[#1A1A1A] hover:bg-neutral-800 text-[#FAF8F5] text-xs font-bold rounded-lg flex items-center gap-1 cursor-pointer transition-colors"
-                >
-                  <Eye className="w-3.5 h-3.5" />
-                  <span>Open Spec</span>
-                </button>
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    if(confirm("Are you sure you want to delete this technical brief?")) {
-                      onDeleteBrief(b.id);
-                    }
-                  }}
-                  className="w-10 h-10 border border-[#E5DDD3] hover:border-red-300 hover:text-red-500 rounded-lg flex items-center justify-center cursor-pointer transition-all"
-                  title="Delete specifications archived"
-                >
-                  <Trash2 className="w-4 h-4" />
-                </button>
+                <div className="flex items-center justify-between pt-3 border-t border-[#1C2120]/10">
+                  <span className="font-mono text-xs font-bold text-[#4A5754]">
+                    {isAudioRead
+                      ? `${b.playbackSpeed || 1.0}x • ${b.audioFormat || "MP3"} Audio`
+                      : `Word • PDF • TXT • ${b.estimatedBudget}`}
+                  </span>
+
+                  <div className="flex items-center gap-2">
+                    {onOpenReadAloudItem ? (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onOpenReadAloudItem(b);
+                        }}
+                        className="fb-interactive inline-flex items-center gap-1.5 bg-[#FBFF28] text-[#1C2120] font-extrabold text-xs px-3.5 py-1.5 rounded-full"
+                      >
+                        <Volume2 className="w-3.5 h-3.5" />
+                        Listen
+                      </button>
+                    ) : null}
+
+                    <button
+                      type="button"
+                      onClick={(e) => handleDeleteWithUndo(b, e)}
+                      className="fb-interactive w-8 h-8 rounded-full bg-red-100 text-red-700 flex items-center justify-center"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
               </div>
-            </motion.div>
-          ))
-        )}
-      </div>
-    </motion.div>
+            );
+          })}
+        </div>
+      )}
+    </div>
   );
-}
+};

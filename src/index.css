@@ -1,43 +1,75 @@
-@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
 @import "tailwindcss";
+@import "../tokens.css";
 
-@theme {
-  --font-sans: "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
-  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
-}
+@layer base {
+  html {
+    background-color: var(--color-paper);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
 
-/* Material Symbols support overlay */
-@import url('https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200');
-
-.material-symbols-outlined {
-  font-family: 'Material Symbols Outlined';
-  font-weight: normal;
-  font-style: normal;
-  font-size: 24px;
-  line-height: 1;
-  letter-spacing: normal;
-  text-transform: none;
-  display: inline-block;
-  white-space: nowrap;
-  word-wrap: normal;
-  direction: ltr;
-  -webkit-font-smoothing: antialiased;
-}
-
-/* Print simulation styling for PDF Export */
-@media print {
   body {
-    background-color: white !important;
-    color: black !important;
+    background-color: var(--color-paper);
+    color: var(--color-ink);
+    margin: 0;
+    overflow-x: hidden;
   }
-  .no-print {
-    display: none !important;
-  }
-  .print-card {
-    border: 1px solid #ccc !important;
-    box-shadow: none !important;
-    background-color: white !important;
-    page-break-inside: avoid;
+
+  ::selection {
+    background-color: var(--color-accent);
+    color: var(--color-dark);
   }
 }
 
+/* Interactive Bubble Physics */
+.fb-interactive {
+  transition-property: transform, background-color, border-color, color, opacity, box-shadow;
+  transition-duration: var(--dur-fast);
+  transition-timing-function: var(--ease-out);
+}
+
+.fb-interactive:active:not(:disabled) {
+  transform: translateY(1px) scale(0.985);
+}
+
+.fb-interactive:focus-visible {
+  outline: 3px solid var(--color-dark);
+  outline-offset: 2px;
+}
+
+.fb-bubble-shadow {
+  box-shadow: var(--shadow-bubble);
+}
+
+.fb-dark-bubble-shadow {
+  box-shadow: var(--shadow-dark-bubble);
+}
+
+.fb-pill-shadow {
+  box-shadow: var(--shadow-pill);
+}
+
+@keyframes fbWavePulse {
+  0%, 100% {
+    transform: scaleY(0.45);
+  }
+  50% {
+    transform: scaleY(1);
+  }
+}
+
+.fb-wave-bar {
+  animation: fbWavePulse 0.75s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

@@ -5,14 +5,15 @@ import multer from "multer";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
 import dotenv from "dotenv";
-import { BRIEF_RESPONSE_SCHEMA, buildBriefPrompt } from "./server/briefSchema";
+import { BRIEF_RESPONSE_SCHEMA, buildBriefPrompt, DocumentOutputType } from "./server/briefSchema";
 import { buildHeuristicBrief } from "./server/heuristicBrief";
 
 dotenv.config();
 
 const app = express();
 const PORT = Number(process.env.PORT) || 3000;
-const FREE_GENERATION_LIMIT = 1;
+// Free tier: 3 generations/reads per month (Pro $18/mo or $139/yr is unlimited)
+const FREE_GENERATION_LIMIT = 3;
 
 interface AuthSession {
   email: string;
@@ -38,15 +39,14 @@ const upload = multer({
   limits: { fileSize: 15 * 1024 * 1024 },
 });
 
-// Initialize Gemini with custom headers for AI Studio tracking (telemetry directive)
 const apiKey = process.env.GEMINI_API_KEY;
 const ai = new GoogleGenAI({
   apiKey: apiKey,
   httpOptions: {
     headers: {
-      'User-Agent': 'aistudio-build',
-    }
-  }
+      "User-Agent": "aistudio-build",
+    },
+  },
 });
 
 function resolveAuthSession(req: express.Request): AuthSession | null {
@@ -56,7 +56,10 @@ function resolveAuthSession(req: express.Request): AuthSession | null {
   return authSessions.get(token) ?? null;
 }
 
-function canGenerate(req: express.Request, body: { deviceId?: string; prefetch?: boolean }): { ok: boolean; error?: string } {
+function canGenerate(
+  req: express.Request,
+  body: { deviceId?: string; prefetch?: boolean }
+): { ok: boolean; error?: string } {
   const session = resolveAuthSession(req);
   if (session?.isAdmin) return { ok: true };
 
@@ -71,7 +74,8 @@ function canGenerate(req: express.Request, body: { deviceId?: string; prefetch?:
   if (used >= FREE_GENERATION_LIMIT) {
     return {
       ok: false,
-      error: "Free generation limit reached (1 per device). Log in with an admin account for unlimited briefs.",
+      error:
+        "Free tier limit reached (3 generations/reads per month). Upgrade to FounderBrief Pro ($18/mo or $139/yr) for unlimited Voice → Doc generations, neural TTS Read Aloud voices, and all export formats.",
     };
   }
   return { ok: true };
@@ -87,7 +91,6 @@ function recordGeneration(req: express.Request, body: { deviceId?: string; prefe
   }
 }
 
-// Admin / user login
 app.post("/api/auth/login", (req, res) => {
   const { email, password } = req.body ?? {};
   const adminEmail = process.env.ADMIN_EMAIL?.trim().toLowerCase();
@@ -107,7 +110,7 @@ app.post("/api/auth/login", (req, res) => {
     const session: AuthSession = {
       email: String(email).trim().toLowerCase(),
       isAdmin: true,
-      name: "Founder Admin",
+      name: "Founder Pro",
     };
     authSessions.set(token, session);
     return res.json({
@@ -134,7 +137,12 @@ app.get("/api/generation-status", (req, res) => {
   }
   const deviceId = req.headers["x-device-id"];
   if (typeof deviceId !== "string") {
-    return res.json({ isAdmin: false, remaining: FREE_GENERATION_LIMIT, used: 0, limit: FREE_GENERATION_LIMIT });
+    return res.json({
+      isAdmin: false,
+      remaining: FREE_GENERATION_LIMIT,
+      used: 0,
+      limit: FREE_GENERATION_LIMIT,
+    });
   }
   const used = deviceGenerationCounts.get(deviceId) ?? 0;
   res.json({
@@ -145,13 +153,30 @@ app.get("/api/generation-status", (req, res) => {
   });
 });
 
-// Endpoint to generate technical brief
+// Endpoint to generate document (PRD, Business Plan, Resume, Pitch Deck Outline, Generic Brief)
 app.post("/api/generate-brief", async (req, res) => {
-  const { idea, answers, deviceId, prefetch } = req.body ?? {};
+  const {
+    idea,
+    answers,
+    deviceId,
+    prefetch,
+    documentType = "PRD",
+    spokenLanguage = "Auto (Urdu / Hindi / Arabic / English)",
+  } = req.body ?? {};
 
   if (!idea) {
-    return res.status(400).json({ error: "Product idea is required." });
+    return res.status(400).json({ error: "Voice note or text input is required." });
   }
+
+  const validDocType: DocumentOutputType = [
+    "PRD",
+    "Business Plan",
+    "Resume",
+    "Pitch Deck Outline",
+    "Generic Brief",
+  ].includes(documentType)
+    ? documentType
+    : "PRD";
 
   const gate = canGenerate(req, { deviceId, prefetch: !!prefetch });
   if (!gate.ok) {
@@ -160,20 +185,20 @@ app.post("/api/generate-brief", async (req, res) => {
 
   try {
     if (!apiKey) {
-      console.warn("GEMINI_API_KEY is not configured. Using heuristic brief builder.");
-      const fallbackBrief = buildHeuristicBrief(idea, answers ?? {});
+      console.warn("GEMINI_API_KEY is not configured. Using heuristic document builder.");
+      const fallbackBrief = buildHeuristicBrief(idea, answers ?? {}, validDocType, spokenLanguage);
       if (!prefetch) recordGeneration(req, { deviceId, prefetch: false });
       return res.json(fallbackBrief);
     }
 
-    const prompt = buildBriefPrompt(idea, answers ?? {});
+    const prompt = buildBriefPrompt(idea, answers ?? {}, validDocType, spokenLanguage);
 
     const response = await ai.models.generateContent({
       model: "gemini-2.5-flash",
       contents: prompt,
       config: {
         systemInstruction:
-          "You are an elite CTO who writes comprehensive, readable product briefs for founders. Use plain language. Output valid JSON matching the schema. The documentMarkdown must be a complete, export-ready PRD in Markdown with ## section headers.",
+          "You are an elite startup advisor and document architect for non-technical South Asian and global founders. Handle Urdu, Hindi, Arabic, and English inputs effortlessly. Output valid JSON matching the schema. The documentMarkdown must be a complete, export-ready document in Markdown with ## section headers.",
         responseMimeType: "application/json",
         responseSchema: BRIEF_RESPONSE_SCHEMA,
       },
@@ -181,16 +206,20 @@ app.post("/api/generate-brief", async (req, res) => {
 
     const parsedResponse = JSON.parse(response.text || "{}");
     if (!prefetch) recordGeneration(req, { deviceId, prefetch: false });
-    res.json(parsedResponse);
+    res.json({
+      ...parsedResponse,
+      documentType: validDocType,
+      spokenLanguage,
+    });
   } catch (error: unknown) {
-    console.error("Gemini brief generation failed, using heuristic fallback:", error);
-    const fallbackBrief = buildHeuristicBrief(idea, answers ?? {});
+    console.error("Gemini generation failed, using heuristic fallback:", error);
+    const fallbackBrief = buildHeuristicBrief(idea, answers ?? {}, validDocType, spokenLanguage);
     if (!prefetch) recordGeneration(req, { deviceId, prefetch: false });
     res.json(fallbackBrief);
   }
 });
 
-// Transcribe voice note → text for mobile mic input (FounderBrief)
+// Transcribe voice note → text for mobile/web mic input (Urdu / Hindi / Arabic / English)
 app.post("/api/transcribe-voice", upload.single("audio"), async (req, res) => {
   try {
     if (!req.file?.buffer?.length) {
@@ -214,9 +243,9 @@ app.post("/api/transcribe-voice", upload.single("audio"), async (req, res) => {
               inlineData: { mimeType, data: base64 },
             },
             {
-              text: `Transcribe the founder's spoken startup product idea from this audio.
+              text: `Transcribe the founder's spoken voice note from this audio.
 Return ONLY the transcription as plain text — no labels, no commentary.
-Preserve mixed languages (e.g. Urdu, Hindi, English code-switching) if spoken.`,
+Preserve mixed languages (Urdu اردو, Hindi हिन्दी, Arabic العربية, Roman Urdu, Hinglish, and English code-switching) accurately.`,
             },
           ],
         },
@@ -225,10 +254,12 @@ Preserve mixed languages (e.g. Urdu, Hindi, English code-switching) if spoken.`,
 
     const text = response.text?.trim();
     if (!text) {
-      return res.status(502).json({ error: "Could not transcribe audio. Please try again or type your idea." });
+      return res
+        .status(502)
+        .json({ error: "Could not transcribe audio. Please try again or type your note." });
     }
 
-    res.json({ text: text.slice(0, 500) });
+    res.json({ text: text.slice(0, 1500) });
   } catch (error: unknown) {
     console.error("Voice transcription failed:", error);
     const status =
@@ -238,7 +269,7 @@ Preserve mixed languages (e.g. Urdu, Hindi, English code-switching) if spoken.`,
     if (status === 403) {
       return res.status(403).json({
         error:
-          "Gemini rejected this API key (403). In AI Studio → API Keys, check the key is not marked Blocked, create a fresh key if needed, update GEMINI_API_KEY in the project root .env, and restart npm run dev.",
+          "Gemini rejected this API key (403). Check GEMINI_API_KEY in .env and restart npm run dev.",
       });
     }
     const message = error instanceof Error ? error.message : "Transcription failed.";
@@ -246,7 +277,6 @@ Preserve mixed languages (e.g. Urdu, Hindi, English code-switching) if spoken.`,
   }
 });
 
-// Health check endpoint
 app.get("/api/health", (req, res) => {
   res.json({ status: "ok" });
 });
@@ -259,10 +289,10 @@ async function startServer() {
     });
     app.use(vite.middlewares);
   } else {
-    const distPath = path.join(process.cwd(), 'dist');
+    const distPath = path.join(process.cwd(), "dist");
     app.use(express.static(distPath));
-    app.get('*', (req, res) => {
-      res.sendFile(path.join(distPath, 'index.html'));
+    app.get("*", (req, res) => {
+      res.sendFile(path.join(distPath, "index.html"));
     });
   }
 

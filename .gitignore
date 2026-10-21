@@ -7,3 +7,10 @@ coverage/
 .env*
 !.env.example
 mobile/.expo/
+
+# secrets and build artifacts
+mobile/credentials.json
+mobile/credentials/
+*.aab
+*.apk
+mobile/.expo-test-bundle/

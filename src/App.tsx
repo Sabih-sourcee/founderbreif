@@ -1,401 +1,564 @@
 import React, { useState, useEffect } from "react";
-import { AnimatePresence, motion } from "motion/react";
-import { BriefAnswers, ProjectBrief, UserProfile } from "./types";
-import LandingScreen from "./components/LandingScreen";
-import DescribeIdeaScreen from "./components/DescribeIdeaScreen";
-import QuestionsScreen from "./components/QuestionsScreen";
-import BriefResultScreen from "./components/BriefResultScreen";
-import BriefHistoryScreen from "./components/BriefHistoryScreen";
-import ProfileScreen from "./components/ProfileScreen";
-import { Home, HelpCircle, FileText, User, AlertCircle, Cpu, Loader2, Sparkles, Terminal } from "lucide-react";
+import { motion, AnimatePresence } from "motion/react";
+import {
+  LayoutGrid,
+  Mic,
+  Volume2,
+  FolderKanban,
+  User,
+  Crown,
+} from "lucide-react";
+import { LandingScreen } from "./components/LandingScreen";
+import { DescribeIdeaScreen } from "./components/DescribeIdeaScreen";
+import { QuestionsScreen } from "./components/QuestionsScreen";
+import { BriefResultScreen } from "./components/BriefResultScreen";
+import { ReadAloudScreen } from "./components/ReadAloudScreen";
+import { BriefHistoryScreen } from "./components/BriefHistoryScreen";
+import { ProfileScreen } from "./components/ProfileScreen";
+import {
+  BriefAnswers,
+  DocumentOutputType,
+  ExportAudioFormat,
+  ProjectBrief,
+  SpokenLanguage,
+  UserProfile,
+  VoiceProfile,
+} from "./types";
+
+type Screen =
+  | "Landing"
+  | "Input"
+  | "Questions"
+  | "Result"
+  | "ReadAloud"
+  | "History"
+  | "Profile";
+
+const STORAGE_KEY_BRIEFS = "founder_brief_archives";
+const STORAGE_KEY_PROFILE = "founder_brief_user_profile";
 
 export default function App() {
-  // Navigation & Step Tracking
-  // Current active view coordinate options: "Landing" | "Input" | "Questions" | "Result" | "History" | "Profile"
-  const [activeTab, setActiveTab] = useState<"Landing" | "Input" | "Questions" | "Result" | "History" | "Profile">("Landing");
-  
-  // Persistent State Objects
+  const [currentScreen, setCurrentScreen] = useState<Screen>("Landing");
   const [idea, setIdea] = useState("");
-  const [activeAnswers, setActiveAnswers] = useState<BriefAnswers | null>(null);
+  const [selectedDocType, setSelectedDocType] = useState<DocumentOutputType>("PRD");
+  const [selectedLanguage, setSelectedLanguage] = useState<SpokenLanguage>("Urdu");
   const [activeBrief, setActiveBrief] = useState<ProjectBrief | null>(null);
+  const [readAloudSeed, setReadAloudSeed] = useState<{ title: string; text: string }>({
+    title: "",
+    text: "",
+  });
   const [briefs, setBriefs] = useState<ProjectBrief[]>([]);
   const [isLoading, setIsLoading] = useState(false);
-  const [loadingStepName, setLoadingStepName] = useState("");
-  const [apiError, setApiError] = useState("");
-
   const [userProfile, setUserProfile] = useState<UserProfile>({
-    name: "Founder Guest",
-    email: "bookspower218@gmail.com",
-    companyName: "Startup Inc.",
-    isLoggedIn: true
+    name: "Founder",
+    email: "founder@founderbrief.app",
+    companyName: "Venture Studio",
+    isLoggedIn: false,
+    isPro: false,
   });
 
-  // Pull existing list of specifications in LocalStorage on startup
   useEffect(() => {
-    try {
-      const cached = localStorage.getItem("founder_brief_archives");
-      if (cached) {
-        setBriefs(JSON.parse(cached));
+    const savedBriefs = localStorage.getItem(STORAGE_KEY_BRIEFS);
+    if (savedBriefs) {
+      try {
+        setBriefs(JSON.parse(savedBriefs));
+      } catch {
+        /* ignore */
       }
-    } catch (err) {
-      console.error("Cache loading failure:", err);
     }
-
-    try {
-      const userCached = localStorage.getItem("founder_brief_user_profile");
-      if (userCached) {
-        setUserProfile(JSON.parse(userCached));
+    const savedProfile = localStorage.getItem(STORAGE_KEY_PROFILE);
+    if (savedProfile) {
+      try {
+        setUserProfile(JSON.parse(savedProfile));
+      } catch {
+        /* ignore */
       }
-    } catch (err) {
-      console.error("User profile reading failure:", err);
     }
   }, []);
 
-  // Sync cache with local storage
-  const syncBriefsCache = (updatedList: ProjectBrief[]) => {
-    setBriefs(updatedList);
-    localStorage.setItem("founder_brief_archives", JSON.stringify(updatedList));
+  const syncBriefs = (updated: ProjectBrief[]) => {
+    setBriefs(updated);
+    localStorage.setItem(STORAGE_KEY_BRIEFS, JSON.stringify(updated));
   };
 
-  const handleStartOnboarding = () => {
-    setActiveTab("Input");
-    setApiError("");
+  const syncProfile = (updated: UserProfile) => {
+    setUserProfile(updated);
+    localStorage.setItem(STORAGE_KEY_PROFILE, JSON.stringify(updated));
   };
 
-  const handleSelectTemplate = (templateText: string) => {
-    setIdea(templateText);
-    setActiveTab("Questions");
-    setApiError("");
-  };
-
-  const handleIdeaSubmitted = (describedIdea: string) => {
-    setIdea(describedIdea);
-    setActiveTab("Questions");
-  };
-
-  // Triggers Gemini backend construction
-  const handleQuestionsFinished = async (finalAnswers: BriefAnswers) => {
-    setActiveAnswers(finalAnswers);
+  const runGeneration = async (
+    ideaText: string,
+    answers: BriefAnswers,
+    docType: DocumentOutputType,
+    lang: SpokenLanguage
+  ) => {
     setIsLoading(true);
-    setApiError("");
-
-    // Simulate progressive processing steps
-    const steps = [
-      "Translating startup vision into functional features...",
-      "Analyzing technical complexity hurdles...",
-      "Constructing investor-ready user story personas...",
-      "Forging CTO-level vetting questions...",
-      "Assembling estimated USD developer budget maps..."
-    ];
-
-    let currentStepIndex = 0;
-    setLoadingStepName(steps[0]);
-    const stepInterval = setInterval(() => {
-      currentStepIndex++;
-      if (currentStepIndex < steps.length) {
-        setLoadingStepName(steps[currentStepIndex]);
-      }
-    }, 1500);
-
     try {
       const response = await fetch("/api/generate-brief", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "X-Device-Id": "web-founder-studio",
+        },
         body: JSON.stringify({
-          idea,
-          answers: finalAnswers
-        })
+          idea: ideaText,
+          answers,
+          documentType: docType,
+          spokenLanguage: lang,
+        }),
       });
 
       const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.error || "Failed to generate your technical spec brief. Please try again.");
-      }
-
-      const generated: ProjectBrief = {
-        id: `spec-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-        title: data.title || "Calculated Project Specs",
-        description: data.description || "Generated Startup Blueprint spec checklist.",
+      const generatedBrief: ProjectBrief = {
+        id: `doc-${Date.now()}`,
+        title: data.title || `FounderBrief — ${docType}`,
+        description: data.tldr || data.description || ideaText,
         complexity: data.complexity || "Medium",
         estimatedBudget: data.estimatedBudget || "$12,000 - $18,000",
-        coreFeatures: data.coreFeatures || [],
-        userStories: data.userStories || [],
-        devQuestions: data.devQuestions || [],
-        createdAt: new Date().toISOString(),
-        originalIdea: idea,
-        answers: finalAnswers
+        coreFeatures:
+          data.functionalRequirements?.map(
+            (r: { name: string; details: string }) => `${r.name}: ${r.details}`
+          ) ||
+          data.businessGoals || [
+            `Structured ${docType} synthesis from ${lang} voice input`,
+          ],
+        userStories: data.userStories || [
+          `As a founder speaking in ${lang}, I want a clear ${docType}.`,
+        ],
+        devQuestions: data.technicalConsiderations?.challenges || [],
+        createdAt: new Date().toLocaleDateString("en-US", {
+          month: "short",
+          day: "numeric",
+          year: "numeric",
+        }),
+        originalIdea: ideaText,
+        answers,
+        documentMarkdown: data.documentMarkdown,
+        documentType: docType,
+        direction: "voice-to-doc",
+        spokenLanguage: lang,
       };
 
-      // Push to active states and sync caches
-      setActiveBrief(generated);
-      const updatedArchive = [generated, ...briefs];
-      syncBriefsCache(updatedArchive);
-      
-      // Advance to specs stage
-      setActiveTab("Result");
-    } catch (err: any) {
-      console.error(err);
-      setApiError(err.message || "An unexpected error occurred during brief generation. Keep prompts safe and simple.");
+      setActiveBrief(generatedBrief);
+      syncBriefs([generatedBrief, ...briefs]);
+      setCurrentScreen("Result");
+    } catch {
+      const fallback: ProjectBrief = {
+        id: `doc-${Date.now()}`,
+        title: `FounderBrief — ${docType}`,
+        description: `[${docType}] Synthesized from ${lang} voice input: ${ideaText}`,
+        complexity: "Medium",
+        estimatedBudget: "$12,000 - $18,000",
+        coreFeatures: [
+          `Complete ${docType} structure tailored to ${lang} founder input`,
+          `Platform: ${answers.platform} • Auth: ${answers.auth}`,
+          `Integrations: ${answers.integrations} • Timeline: ${answers.timeline}`,
+        ],
+        userStories: [
+          `As a founder speaking in ${lang}, I want my voice note converted into a ${docType}.`,
+        ],
+        devQuestions: ["Confirm regional payment gateway & messaging hooks."],
+        createdAt: new Date().toLocaleDateString("en-US", {
+          month: "short",
+          day: "numeric",
+          year: "numeric",
+        }),
+        originalIdea: ideaText,
+        answers,
+        documentType: docType,
+        direction: "voice-to-doc",
+        spokenLanguage: lang,
+      };
+      setActiveBrief(fallback);
+      syncBriefs([fallback, ...briefs]);
+      setCurrentScreen("Result");
     } finally {
-      clearInterval(stepInterval);
       setIsLoading(false);
     }
   };
 
-  const handleDeleteBrief = (id: string) => {
-    const updated = briefs.filter((b) => b.id !== id);
-    syncBriefsCache(updated);
-    if (activeBrief?.id === id) {
-      setActiveBrief(null);
-    }
+  const handleSaveReadAloud = (payload: {
+    title: string;
+    text: string;
+    voice: VoiceProfile;
+    speed: number;
+    audioFormat: ExportAudioFormat;
+  }) => {
+    const newAudioDoc: ProjectBrief = {
+      id: `audio-${Date.now()}`,
+      title: payload.title,
+      description: payload.text,
+      complexity: "Low",
+      estimatedBudget: `${payload.audioFormat} Audio`,
+      coreFeatures: [
+        `Voice: ${payload.voice.name} (${payload.voice.language})`,
+        `Playback Speed: ${payload.speed}x`,
+      ],
+      userStories: [],
+      devQuestions: [],
+      createdAt: new Date().toLocaleDateString("en-US", {
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+      }),
+      originalIdea: payload.text,
+      answers: {
+        platform: "Both",
+        platformDetails: "",
+        auth: "Email & Password",
+        authDetails: "",
+        integrations: "Payments",
+        integrationsDetails: "",
+        design: "Dynamic Bubble UI",
+        designDetails: "",
+        timeline: "Flexible",
+        timelineDetails: "",
+      },
+      documentType: "Generic Brief",
+      direction: "doc-to-voice",
+      spokenLanguage: payload.voice.language,
+      voiceId: payload.voice.id,
+      playbackSpeed: payload.speed,
+      audioFormat: payload.audioFormat,
+    };
+    syncBriefs([newAudioDoc, ...briefs]);
   };
 
-  const handleSelectBrief = (selected: ProjectBrief) => {
-    setActiveBrief(selected);
-    setIdea(selected.originalIdea);
-    setActiveAnswers(selected.answers);
-    setActiveTab("Result");
-  };
-
-  const handleOnboardingRestart = () => {
-    setIdea("");
-    setActiveAnswers(null);
-    setActiveBrief(null);
-    setActiveTab("Input");
-    setApiError("");
-  };
-
-  // Render dynamic view selection coordinate mapping
-  const renderInteractiveBlock = () => {
-    switch (activeTab) {
-      case "Input":
-        return (
-          <DescribeIdeaScreen
-            initialIdea={idea}
-            onContinue={handleIdeaSubmitted}
-            onBack={() => setActiveTab("Landing")}
-          />
-        );
-      case "Questions":
-        return (
-          <QuestionsScreen
-            onFinish={handleQuestionsFinished}
-            onBack={() => setActiveTab("Input")}
-          />
-        );
-      case "Result":
-        return activeBrief ? (
-          <BriefResultScreen
-            brief={activeBrief}
-            onRestart={handleOnboardingRestart}
-          />
-        ) : (
-          <LandingScreen
-            onGetStarted={handleStartOnboarding}
-            onSignIn={() => setActiveTab("Profile")}
-            onSelectTemplate={handleSelectTemplate}
-          />
-        );
-      case "History":
-        return (
-          <BriefHistoryScreen
-            briefs={briefs}
-            onSelectBrief={handleSelectBrief}
-            onDeleteBrief={handleDeleteBrief}
-            onNewBrief={handleOnboardingRestart}
-          />
-        );
-      case "Profile":
-        return (
-          <ProfileScreen
-            userEmail={userProfile.email}
-            savedBriefsCount={briefs.length}
-            briefs={briefs}
-            onAuthChanged={(profile) => setUserProfile(profile)}
-          />
-        );
-      case "Landing":
-      default:
-        return (
-          <LandingScreen
-            onGetStarted={handleStartOnboarding}
-            onSignIn={() => setActiveTab("Profile")}
-            onSelectTemplate={handleSelectTemplate}
-          />
-        );
-    }
-  };
+  const navItems: Array<{
+    id: Screen;
+    label: string;
+    icon: React.ReactNode;
+    active: boolean;
+    badge?: number;
+  }> = [
+    {
+      id: "Landing",
+      label: "Home",
+      icon: <LayoutGrid className="w-4 h-4" />,
+      active: currentScreen === "Landing" || currentScreen === "Result",
+    },
+    {
+      id: "Input",
+      label: "Record",
+      icon: <Mic className="w-4 h-4" />,
+      active: currentScreen === "Input" || currentScreen === "Questions",
+    },
+    {
+      id: "ReadAloud",
+      label: "Read Aloud",
+      icon: <Volume2 className="w-4 h-4" />,
+      active: currentScreen === "ReadAloud",
+    },
+    {
+      id: "History",
+      label: "Library",
+      icon: <FolderKanban className="w-4 h-4" />,
+      active: currentScreen === "History",
+      badge: briefs.length > 0 ? briefs.length : undefined,
+    },
+    {
+      id: "Profile",
+      label: "Profile",
+      icon: <User className="w-4 h-4" />,
+      active: currentScreen === "Profile",
+    },
+  ];
 
   return (
-    <div className="bg-[#FAF8F5] text-[#1A1A1A] min-h-screen flex flex-col font-sans selection:bg-[#E07B39]/20 relative">
-      
-      {/* Dynamic Loading Overlay during active generation API requests */}
-      <AnimatePresence>
-        {isLoading && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[100] bg-[#FAF8F5]/90 flex flex-col items-center justify-center p-6 text-center"
+    <div className="min-h-screen bg-[#DAF7F3] text-[#1C2120] flex flex-col">
+      {/* Top Bubble Masthead */}
+      <header className="sticky top-0 z-30 bg-[#DAF7F3]/90 backdrop-blur-md px-4 sm:px-6 py-3.5">
+        <div className="max-w-5xl mx-auto flex items-center justify-between gap-4">
+          {/* Brand Logo (Speech-Bubble Document with Checkmark Badge) */}
+          <button
+            type="button"
+            onClick={() => setCurrentScreen("Landing")}
+            className="fb-interactive flex items-center gap-3 text-left"
           >
-            {/* Spinning technical lock elements */}
-            <div className="relative w-24 h-24 mb-6 flex items-center justify-center">
-              <Loader2 className="absolute w-16 h-16 text-[#E07B39] animate-spin" />
-              <Cpu className="w-8 h-8 text-[#1A1A1A] animate-pulse" />
-            </div>
-
-            <motion.h3 
-              initial={{ y: 10, opacity: 0 }}
-              animate={{ y: 0, opacity: 1 }}
-              className="text-lg font-bold text-[#1A1A1A] max-w-sm mb-2"
-            >
-              Generating your Blueprint...
-            </motion.h3>
-            
-            <AnimatePresence mode="wait">
-              <motion.p
-                key={loadingStepName}
-                initial={{ opacity: 0, scale: 0.95 }}
-                animate={{ opacity: 1, scale: 1 }}
-                exit={{ opacity: 0 }}
-                className="text-xs text-[#444748] max-w-xs font-semibold leading-relaxed"
+            <div className="w-10 h-10 rounded-[14px] bg-[#1C2120] flex items-center justify-center relative fb-pill-shadow">
+              <svg
+                width="22"
+                height="22"
+                viewBox="0 0 24 24"
+                fill="none"
+                xmlns="http://www.w3.org/2000/svg"
               >
-                {loadingStepName}
-              </motion.p>
-            </AnimatePresence>
+                <path
+                  d="M6 4H14L18 8V15C18 16.1046 17.1046 17 16 17H11L7.5 20V17H6C4.89543 17 4 16.1046 4 15V6C4 4.89543 4.89543 4 6 4Z"
+                  stroke="#FBFF28"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+                <line x1="7.5" y1="8.5" x2="13.5" y2="8.5" stroke="#FBFF28" strokeWidth="1.8" strokeLinecap="round" />
+                <line x1="7.5" y1="11.5" x2="13.5" y2="11.5" stroke="#FBFF28" strokeWidth="1.8" strokeLinecap="round" />
+                <circle cx="17.5" cy="17.5" r="4.5" fill="#FBFF28" />
+                <path
+                  d="M15.8 17.5L17 18.7L19.4 16.3"
+                  stroke="#1C2120"
+                  strokeWidth="1.8"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            </div>
+            <div>
+              <div className="text-lg font-extrabold tracking-tight text-[#1C2120] leading-none">
+                FounderBrief
+              </div>
+              <div className="font-mono text-[10px] font-bold text-[#4A5754] tracking-wider uppercase mt-0.5">
+                VOICE ↔ DOCUMENT PLATFORM
+              </div>
+            </div>
+          </button>
 
-            <span className="text-[10px] text-[#444748] mt-20 uppercase font-mono font-bold tracking-wider inline-flex items-center gap-1.5">
-              <Sparkles className="w-3 h-3 text-[#E07B39]" />
-              Powered by Google Gemini
-            </span>
-          </motion.div>
-        )}
-      </AnimatePresence>
+          {/* Desktop Bubble Nav */}
+          <nav className="hidden md:flex items-center gap-1.5 bg-[#1C2120] p-1.5 rounded-full fb-dark-bubble-shadow">
+            {navItems.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => setCurrentScreen(item.id)}
+                className={`fb-interactive inline-flex items-center gap-2 px-4 py-2 rounded-full text-xs font-extrabold ${
+                  item.active
+                    ? "bg-[#FBFF28] text-[#1C2120]"
+                    : "text-[#B8C7C4] hover:text-white"
+                }`}
+              >
+                {item.icon}
+                <span>{item.label}</span>
+                {item.badge ? (
+                  <span
+                    className={`font-mono text-[10px] px-1.5 py-0.2 rounded-full ${
+                      item.active
+                        ? "bg-[#1C2120] text-[#FBFF28]"
+                        : "bg-white/15 text-white"
+                    }`}
+                  >
+                    {item.badge}
+                  </span>
+                ) : null}
+              </button>
+            ))}
+          </nav>
 
-      {/* Global Top AppBar Bar */}
-      <header className="w-full top-0 sticky z-40 bg-[#FAF8F5]/90 backdrop-blur-md border-b border-[#E5DDD3] no-print">
-        <div className="flex items-center justify-between px-4 sm:px-6 h-16 w-full max-w-7xl mx-auto">
-          {/* Brand header */}
-          <div className="flex items-center gap-2">
-            <button 
-              onClick={() => setActiveTab("Landing")}
-              className="p-1.5 hover:bg-[#F2EEE8] transition-colors rounded-lg cursor-pointer flex items-center justify-center"
-            >
-              <Terminal className="text-[#1A1A1A] w-5 h-5 sm:w-6 sm:h-6" />
-            </button>
-            <span 
-              onClick={() => setActiveTab("Landing")}
-              className="text-lg sm:text-xl font-black text-[#1A1A1A] cursor-pointer tracking-tight"
-            >
-              FounderBrief
-            </span>
-          </div>
-
-          {/* Dynamic Active User Indicator Profile button */}
-          <div 
-            onClick={() => setActiveTab("Profile")}
-            className="flex items-center gap-2 cursor-pointer group"
+          {/* Profile Avatar Pill */}
+          <button
+            type="button"
+            onClick={() => setCurrentScreen("Profile")}
+            className="fb-interactive inline-flex items-center gap-2.5 bg-white px-3.5 py-1.5 rounded-full fb-bubble-shadow"
           >
-            <span className="text-xs font-semibold text-[#444748] max-w-[120px] truncate hidden sm:inline group-hover:text-[#1A1A1A] transition-colors font-mono">
+            <div
+              className={`w-7 h-7 rounded-full flex items-center justify-center font-mono text-xs font-extrabold ${
+                userProfile.isPro
+                  ? "bg-[#FBFF28] text-[#1C2120]"
+                  : "bg-[#1C2120] text-[#FBFF28]"
+              }`}
+            >
+              {userProfile.isPro ? (
+                <Crown className="w-3.5 h-3.5" />
+              ) : (
+                userProfile.name.charAt(0).toUpperCase()
+              )}
+            </div>
+            <span className="text-xs font-extrabold text-[#1C2120] hidden sm:inline">
               {userProfile.name}
             </span>
-            <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-full bg-[#1A1A1A] text-[#FAF8F5] border border-[#E5DDD3] flex items-center justify-center overflow-hidden font-bold text-sm relative uppercase leading-none">
-              {userProfile.name ? userProfile.name.charAt(0) : "F"}
-            </div>
-          </div>
+          </button>
         </div>
       </header>
 
-      {/* Main Canvas Segment Router */}
-      <main className="flex-grow flex flex-col justify-start pb-20">
-        
-        {/* Dynamic global error banner inside the applet view screen */}
-        {apiError && (
-          <div className="max-w-2xl mx-auto w-full px-4 sm:px-5 pt-4 no-print text-left">
-            <div className="p-4 bg-red-50 border border-red-200 text-red-700 rounded-xl flex items-start gap-2.5">
-              <AlertCircle className="w-5 h-5 shrink-0 mt-0.5" />
-              <div className="text-xs text-left">
-                <p className="font-bold mb-1">Brief Generation Hindered</p>
-                <p className="leading-relaxed font-semibold">{apiError}</p>
-                <button
-                  onClick={() => setApiError("")}
-                  className="mt-2 text-[10px] font-mono font-bold bg-white text-red-700 border border-red-200 px-2 py-0.5 rounded uppercase hover:bg-red-100"
-                >
-                  Dismiss Banner
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
+      {/* Main Content */}
+      <main className="flex-1">
         <AnimatePresence mode="wait">
-          {renderInteractiveBlock()}
+          <motion.div
+            key={currentScreen}
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -6 }}
+            transition={{ duration: 0.18 }}
+          >
+            {currentScreen === "Landing" && (
+              <LandingScreen
+                userName={userProfile.name}
+                isPro={Boolean(userProfile.isPro)}
+                savedBriefsCount={briefs.length}
+                onGetStarted={(dt, lang) => {
+                  if (dt) setSelectedDocType(dt);
+                  if (lang) setSelectedLanguage(lang);
+                  setCurrentScreen("Input");
+                }}
+                onOpenReadAloud={() => setCurrentScreen("ReadAloud")}
+                onOpenLibrary={() => setCurrentScreen("History")}
+                onSignIn={() => setCurrentScreen("Profile")}
+                onSelectTemplate={(tpl, dt, lang) => {
+                  setIdea(tpl);
+                  if (dt) setSelectedDocType(dt);
+                  if (lang) setSelectedLanguage(lang);
+                  setCurrentScreen("Input");
+                }}
+              />
+            )}
+
+            {currentScreen === "Input" && (
+              <DescribeIdeaScreen
+                initialIdea={idea}
+                initialDocType={selectedDocType}
+                initialLanguage={selectedLanguage}
+                onNext={(txt, dt, lang) => {
+                  setIdea(txt);
+                  if (dt) setSelectedDocType(dt);
+                  if (lang) setSelectedLanguage(lang);
+                  setCurrentScreen("Questions");
+                }}
+                onInstantGenerate={(txt, dt, lang) => {
+                  setIdea(txt);
+                  setSelectedDocType(dt);
+                  setSelectedLanguage(lang);
+                  runGeneration(
+                    txt,
+                    {
+                      platform: "Both",
+                      platformDetails: "",
+                      auth: "Email & Password",
+                      authDetails: "",
+                      integrations: "Payments",
+                      integrationsDetails: "",
+                      design: "Dynamic Bubble UI",
+                      designDetails: "",
+                      timeline: "Full Release (3-6 months)",
+                      timelineDetails: "",
+                    },
+                    dt,
+                    lang
+                  );
+                }}
+                onBack={() => setCurrentScreen("Landing")}
+              />
+            )}
+
+            {currentScreen === "Questions" && (
+              <QuestionsScreen
+                onComplete={(ans) =>
+                  runGeneration(idea, ans, selectedDocType, selectedLanguage)
+                }
+                onBack={() => setCurrentScreen("Input")}
+              />
+            )}
+
+            {currentScreen === "Result" && activeBrief && (
+              <BriefResultScreen
+                brief={activeBrief}
+                onStartOver={() => {
+                  setIdea("");
+                  setCurrentScreen("Input");
+                }}
+                onOpenInReadAloud={(b) => {
+                  setReadAloudSeed({
+                    title: b.title,
+                    text: b.description || b.originalIdea,
+                  });
+                  setCurrentScreen("ReadAloud");
+                }}
+              />
+            )}
+
+            {currentScreen === "ReadAloud" && (
+              <ReadAloudScreen
+                initialTitle={readAloudSeed.title}
+                initialText={readAloudSeed.text}
+                isPro={Boolean(userProfile.isPro)}
+                savedDocs={briefs}
+                onSaveReadAloudToLibrary={handleSaveReadAloud}
+                onUpgradePro={() => setCurrentScreen("Profile")}
+              />
+            )}
+
+            {currentScreen === "History" && (
+              <BriefHistoryScreen
+                briefs={briefs}
+                onSelectBrief={(b) => {
+                  setActiveBrief(b);
+                  setCurrentScreen("Result");
+                }}
+                onOpenReadAloudItem={(b) => {
+                  setReadAloudSeed({
+                    title: b.title,
+                    text: b.description || b.originalIdea,
+                  });
+                  setCurrentScreen("ReadAloud");
+                }}
+                onDeleteBrief={(id) => {
+                  syncBriefs(briefs.filter((b) => b.id !== id));
+                }}
+                onRestoreBriefs={syncBriefs}
+                onNewBrief={() => {
+                  setIdea("");
+                  setCurrentScreen("Input");
+                }}
+                onNewReadAloud={() => setCurrentScreen("ReadAloud")}
+              />
+            )}
+
+            {currentScreen === "Profile" && (
+              <ProfileScreen
+                profile={userProfile}
+                briefsCount={briefs.length}
+                briefs={briefs}
+                onUpdateProfile={syncProfile}
+                onSignOut={() => {
+                  syncProfile({
+                    name: "Founder",
+                    email: "founder@founderbrief.app",
+                    companyName: "Venture Studio",
+                    isLoggedIn: false,
+                    isPro: false,
+                  });
+                }}
+              />
+            )}
+          </motion.div>
         </AnimatePresence>
       </main>
 
-      {/* Global persistent Bottom tabbar Navigation shell */}
-      <nav className="fixed bottom-0 left-0 w-full flex justify-around items-center h-16 bg-[#FAF8F5]/90 backdrop-blur-md border-t border-[#E5DDD3] z-[45] pb-safe no-print">
-        <button
-          onClick={() => {
-            if (activeBrief) {
-              setActiveTab("Result");
-            } else {
-              setActiveTab("Landing");
-            }
-          }}
-          className={`flex flex-col items-center justify-center flex-1 py-1 transition-all cursor-pointer ${
-            activeTab === "Landing" || activeTab === "Input" || activeTab === "Result"
-              ? "text-[#E07B39] font-bold scale-105"
-              : "text-[#444748] hover:text-[#1A1A1A]"
-          }`}
-        >
-          <Home className="w-5 h-5" />
-          <span className="text-[10px] font-semibold mt-0.5">Home</span>
-        </button>
-
-        <button
-          onClick={() => {
-            if (idea) {
-              setActiveTab("Questions");
-            } else {
-              setActiveTab("Input");
-            }
-          }}
-          className={`flex flex-col items-center justify-center flex-1 py-1 transition-all cursor-pointer ${
-            activeTab === "Questions"
-              ? "text-[#E07B39] font-bold scale-105"
-              : "text-[#444748] hover:text-[#1A1A1A]"
-          }`}
-        >
-          <HelpCircle className="w-5 h-5" />
-          <span className="text-[10px] font-semibold mt-0.5">Questions</span>
-        </button>
-
-        <button
-          onClick={() => setActiveTab("History")}
-          className={`flex flex-col items-center justify-center flex-1 py-1 transition-all cursor-pointer ${
-            activeTab === "History"
-              ? "text-[#E07B39] font-bold scale-105"
-              : "text-[#444748] hover:text-[#1A1A1A]"
-          }`}
-        >
-          <FileText className="w-5 h-5" />
-          <span className="text-[10px] font-semibold mt-0.5">Briefs</span>
-        </button>
-
-        <button
-          onClick={() => setActiveTab("Profile")}
-          className={`flex flex-col items-center justify-center flex-1 py-1 transition-all cursor-pointer ${
-            activeTab === "Profile"
-              ? "text-[#E07B39] font-bold scale-105"
-              : "text-[#444748] hover:text-[#1A1A1A]"
-          }`}
-        >
-          <User className="w-5 h-5" />
-          <span className="text-[10px] font-semibold mt-0.5">Profile</span>
-        </button>
+      {/* Mobile Floating Bubble Bottom Navigation */}
+      <nav className="md:hidden fixed bottom-3 left-1/2 -translate-x-1/2 z-30 w-[94%] max-w-md bg-[#1C2120] rounded-full p-2 fb-dark-bubble-shadow flex items-center justify-around">
+        {navItems.map((item) => (
+          <button
+            key={item.id}
+            type="button"
+            onClick={() => setCurrentScreen(item.id)}
+            className={`fb-interactive flex flex-col items-center justify-center px-3 py-1.5 rounded-full text-[10px] font-extrabold ${
+              item.active
+                ? "bg-[#FBFF28] text-[#1C2120]"
+                : "text-[#B8C7C4]"
+            }`}
+          >
+            {item.icon}
+            <span className="mt-0.5">{item.label}</span>
+          </button>
+        ))}
       </nav>
+
+      {/* Loading Synthesis Modal */}
+      {isLoading && (
+        <div className="fixed inset-0 z-50 bg-[#1C2120]/65 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-[#1C2120] text-white rounded-[34px] p-8 max-w-sm w-full fb-dark-bubble-shadow text-center">
+            <div className="w-12 h-12 rounded-full bg-[#FBFF28] text-[#1C2120] flex items-center justify-center mx-auto mb-4 animate-pulse font-mono font-extrabold">
+              ✦
+            </div>
+            <div className="font-mono text-xs font-extrabold text-[#FBFF28] uppercase tracking-wider mb-1">
+              SYNTHESIZING {selectedDocType.toUpperCase()}
+            </div>
+            <h3 className="text-xl font-extrabold mb-2">
+              Formatting your {selectedLanguage} voice note…
+            </h3>
+            <p className="text-xs text-[#B8C7C4]">
+              Preparing Word, PDF, TXT exports & Read Aloud audio hooks.
+            </p>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

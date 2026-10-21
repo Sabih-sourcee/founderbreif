@@ -7,7 +7,7 @@
     "userInterfaceStyle": "light",
     "splash": {
       "resizeMode": "contain",
-      "backgroundColor": "#FAF8F5"
+      "backgroundColor": "#DAF7F3"
     },
     "ios": {
       "supportsTablet": true,
@@ -15,7 +15,7 @@
     },
     "android": {
       "adaptiveIcon": {
-        "backgroundColor": "#FAF8F5"
+        "backgroundColor": "#DAF7F3"
       },
       "package": "com.founderbrief.app",
       "permissions": [
@@ -30,7 +30,8 @@
         {
           "microphonePermission": "FounderBrief needs microphone access so you can dictate your startup idea."
         }
-      ]
+      ],
+      "expo-font"
     ],
     "extra": {
       "apiUrl": "http://localhost:3000",

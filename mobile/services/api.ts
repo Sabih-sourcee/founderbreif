@@ -1,5 +1,11 @@
 import Constants from "expo-constants";
-import { BriefAnswers, BriefApiResponse, DEFAULT_ANSWERS } from "../types";
+import {
+  BriefAnswers,
+  BriefApiResponse,
+  DEFAULT_ANSWERS,
+  DocumentOutputType,
+  SpokenLanguage,
+} from "../types";
 import { getDeviceId } from "./storage";
 
 export function getApiBaseUrl(): string {
@@ -43,14 +49,19 @@ export async function getGenerationStatus(authToken?: string): Promise<{
   const baseUrl = getApiBaseUrl();
   const headers = await apiHeaders(authToken);
   const res = await fetch(`${baseUrl}/api/generation-status`, { headers });
-  if (!res.ok) return { isAdmin: false, used: 0, limit: 1, remaining: 1 };
+  if (!res.ok) return { isAdmin: false, used: 0, limit: 3, remaining: 3 };
   return res.json();
 }
 
 export async function generateFounderBrief(
   idea: string,
   answers: BriefAnswers,
-  options?: { prefetch?: boolean; authToken?: string }
+  options?: {
+    prefetch?: boolean;
+    authToken?: string;
+    documentType?: DocumentOutputType;
+    spokenLanguage?: SpokenLanguage;
+  }
 ): Promise<BriefApiResponse> {
   const baseUrl = getApiBaseUrl();
   const deviceId = await getDeviceId();
@@ -64,6 +75,8 @@ export async function generateFounderBrief(
       answers,
       deviceId,
       prefetch: !!options?.prefetch,
+      documentType: options?.documentType ?? "PRD",
+      spokenLanguage: options?.spokenLanguage ?? "Urdu",
     }),
   });
 
@@ -74,8 +87,18 @@ export async function generateFounderBrief(
   return data;
 }
 
-export function startPrefetchBrief(idea: string, authToken?: string): Promise<BriefApiResponse> {
-  return generateFounderBrief(idea, DEFAULT_ANSWERS, { prefetch: true, authToken });
+export function startPrefetchBrief(
+  idea: string,
+  authToken?: string,
+  documentType: DocumentOutputType = "PRD",
+  spokenLanguage: SpokenLanguage = "Urdu"
+): Promise<BriefApiResponse> {
+  return generateFounderBrief(idea, DEFAULT_ANSWERS, {
+    prefetch: true,
+    authToken,
+    documentType,
+    spokenLanguage,
+  });
 }
 
 export async function checkBackendHealth(): Promise<boolean> {
