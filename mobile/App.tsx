@@ -14,7 +14,16 @@ import {
 
 import { COLORS, SHADOW } from "./constants/theme";
 import { getQuestions } from "./constants/questions";
-import { Card, FadeIn, NavBar, ProgressBar, Toast, Txt, TYPE } from "./components/kit";
+import {
+  Card,
+  NavBar,
+  ProgressBar,
+  ScreenTransition,
+  Toast,
+  TransitionDirection,
+  Txt,
+  TYPE,
+} from "./components/kit";
 import HomeScreen, { AppNotification } from "./screens/HomeScreen";
 import RecordScreen from "./screens/RecordScreen";
 import QuestionsScreen from "./screens/QuestionsScreen";
@@ -84,6 +93,7 @@ interface Reading {
 interface NavState {
   screen: Screen;
   stack: Screen[];
+  dir: TransitionDirection;
 }
 
 export default function App() {
@@ -131,25 +141,27 @@ function AppShell() {
   const insets = useSafeAreaInsets();
 
   /* ---------------- navigation ---------------- */
-  const [nav, setNav] = useState<NavState>({ screen: "Home", stack: [] });
+  const [nav, setNav] = useState<NavState>({ screen: "Home", stack: [], dir: "tab" });
   const navRef = useRef(nav);
   navRef.current = nav;
   const { screen } = nav;
 
   const navigate = useCallback(
-    (next: Screen) => setNav((n) => ({ screen: next, stack: [...n.stack, n.screen] })),
+    (next: Screen) =>
+      setNav((n) => ({ screen: next, stack: [...n.stack, n.screen], dir: "forward" })),
     []
   );
   const resetTo = useCallback(
-    (next: Screen, stack: Screen[] = []) => setNav({ screen: next, stack }),
+    (next: Screen, stack: Screen[] = [], dir: TransitionDirection = "tab") =>
+      setNav({ screen: next, stack, dir }),
     []
   );
   const goBack = useCallback(
     () =>
       setNav((n) =>
         n.stack.length
-          ? { screen: n.stack[n.stack.length - 1], stack: n.stack.slice(0, -1) }
-          : { screen: "Home", stack: [] }
+          ? { screen: n.stack[n.stack.length - 1], stack: n.stack.slice(0, -1), dir: "back" }
+          : { screen: "Home", stack: [], dir: "back" }
       ),
     []
   );
@@ -374,7 +386,7 @@ function AppShell() {
       setMessages([]);
       setAnswers([]);
       setQuestionsKey((k) => k + 1);
-      resetTo("Result", ["Home"]);
+      resetTo("Result", ["Home"], "forward");
       if (offline) {
         setToast("Couldn't reach the server, so this document was built on your device.");
       }
@@ -569,7 +581,7 @@ function AppShell() {
       id: "draft",
       title: `Resume your ${typeLabel}`,
       subtitle: `${answers.length} of ${getQuestions(docType).length} questions answered`,
-      onPress: () => resetTo("Questions", ["Home", "Record"]),
+      onPress: () => resetTo("Questions", ["Home", "Record"], "forward"),
     });
   }
   if (!isPro && documentsThisMonth >= FREE_MONTHLY_LIMIT - 1) {
@@ -798,7 +810,9 @@ function AppShell() {
           paddingBottom: showNav || keyboardVisible ? 0 : Math.max(insets.bottom, 10),
         }}
       >
-        <FadeIn triggerKey={screen}>{renderScreen()}</FadeIn>
+        <ScreenTransition triggerKey={screen} direction={nav.dir}>
+          {renderScreen()}
+        </ScreenTransition>
 
         {isLoading ? (
           <View style={styles.loadingOverlay} pointerEvents="auto">

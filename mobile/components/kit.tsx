@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { createContext, useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   Animated,
   Easing,
@@ -114,6 +114,81 @@ export function Tap({
 }
 
 /* ------------------------------------------------------------------ */
+/* Staggered enter animation (driven by ScreenTransition)              */
+/* ------------------------------------------------------------------ */
+
+interface EnterContextValue {
+  progress: Animated.Value;
+  next: () => number;
+}
+
+const EnterContext = createContext<EnterContextValue | null>(null);
+
+const ENTER_EASE = Easing.bezier(0.2, 0.9, 0.25, 1.05);
+const ENTER_STEP = 0.07;
+const ENTER_SPAN = 0.46;
+const ENTER_MAX_START = 1 - ENTER_SPAN;
+const EASE_SAMPLES = [0, 0.08, 0.16, 0.26, 0.38, 0.52, 0.68, 0.84, 1];
+const EASE_VALUES = EASE_SAMPLES.map((x) => (x === 0 ? 0 : x === 1 ? 1 : ENTER_EASE(x)));
+
+export type EnterKind = "rise" | "drop" | "pop" | "fromLeft" | "fromRight";
+
+/**
+ * Each element takes the next slot in the current screen's sequence and
+ * animates inside its own keyframe window of the shared progress value.
+ */
+export function useEnterStyle(kind: EnterKind = "rise") {
+  const ctx = useContext(EnterContext);
+  const order = useRef<number | null>(null);
+  if (ctx && order.current === null) order.current = ctx.next();
+  if (!ctx || order.current === null) return undefined;
+
+  const start = Math.min(order.current * ENTER_STEP, ENTER_MAX_START);
+  // The native driver can't run an easing inside interpolate, so the curve is
+  // baked into keyframes instead.
+  const t = ctx.progress.interpolate({
+    inputRange: [0, ...EASE_SAMPLES.map((x) => start + x * ENTER_SPAN), 1],
+    outputRange: [0, ...EASE_VALUES, 1],
+    extrapolate: "clamp",
+  });
+  const opacity = ctx.progress.interpolate({
+    inputRange: [0, start, start + ENTER_SPAN * 0.5, 1],
+    outputRange: [0, 0, 1, 1],
+    extrapolate: "clamp",
+  });
+
+  const move = (from: number) => t.interpolate({ inputRange: [0, 1], outputRange: [from, 0] });
+  const grow = (from: number) => t.interpolate({ inputRange: [0, 1], outputRange: [from, 1] });
+
+  switch (kind) {
+    case "drop":
+      return { opacity, transform: [{ translateY: move(-18) }, { scale: grow(0.97) }] };
+    case "pop":
+      return { opacity, transform: [{ translateY: move(14) }, { scale: grow(0.84) }] };
+    case "fromLeft":
+      return { opacity, transform: [{ translateX: move(-30) }, { scale: grow(0.96) }] };
+    case "fromRight":
+      return { opacity, transform: [{ translateX: move(30) }, { scale: grow(0.96) }] };
+    default:
+      return { opacity, transform: [{ translateY: move(26) }, { scale: grow(0.965) }] };
+  }
+}
+
+/** Wrapper for pressable components that already own their transform. */
+export function Enter({
+  children,
+  kind,
+  style,
+}: {
+  children: React.ReactNode;
+  kind?: EnterKind;
+  style?: StyleProp<ViewStyle>;
+}) {
+  const enter = useEnterStyle(kind);
+  return <Animated.View style={[style, enter]}>{children}</Animated.View>;
+}
+
+/* ------------------------------------------------------------------ */
 /* Screen frame                                                        */
 /* ------------------------------------------------------------------ */
 
@@ -152,19 +227,21 @@ export function CircleButton({
   style?: StyleProp<ViewStyle>;
 }) {
   return (
-    <Tap
-      onPress={onPress}
-      accessibilityLabel={accessibilityLabel}
-      style={[
-        styles.circleBtn,
-        { width: size, height: size, borderRadius: size / 2 },
-        SHADOW,
-        style,
-      ]}
-    >
-      {children}
-      {dot ? <View style={styles.dot} /> : null}
-    </Tap>
+    <Enter kind="pop">
+      <Tap
+        onPress={onPress}
+        accessibilityLabel={accessibilityLabel}
+        style={[
+          styles.circleBtn,
+          { width: size, height: size, borderRadius: size / 2 },
+          SHADOW,
+          style,
+        ]}
+      >
+        {children}
+        {dot ? <View style={styles.dot} /> : null}
+      </Tap>
+    </Enter>
   );
 }
 
@@ -189,8 +266,9 @@ export function TopBar({
   onRight,
   rightLabel,
 }: TopBarProps) {
+  const enter = useEnterStyle("drop");
   return (
-    <View style={[styles.topBar, SHADOW]}>
+    <Animated.View style={[styles.topBar, SHADOW, enter]}>
       <Tap
         onPress={onLeft}
         style={styles.topBarSlot}
@@ -214,23 +292,27 @@ export function TopBar({
           </Tap>
         ) : null}
       </View>
-    </View>
+    </Animated.View>
   );
 }
 
 /** Large left-aligned screen title used by Library and Profile. */
 export function ScreenTitle({ title, right }: { title: string; right?: React.ReactNode }) {
+  const enter = useEnterStyle("drop");
   return (
-    <View style={styles.screenTitleRow}>
+    <Animated.View style={[styles.screenTitleRow, enter]}>
       <Txt style={TYPE.largeTitle}>{title}</Txt>
       {right}
-    </View>
+    </Animated.View>
   );
 }
 
 /* ------------------------------------------------------------------ */
 /* Bottom navbar: white pill, 5 tabs, yellow circle on the active tab  */
 /* ------------------------------------------------------------------ */
+
+const NAV_PILL_H = 70;
+const NAV_LIFT = 24;
 
 const NAV_ITEMS: Array<{
   id: TabId;
@@ -245,6 +327,44 @@ const NAV_ITEMS: Array<{
   { id: "Profile", label: "Profile", icon: "person-outline", iconActive: "person" },
 ];
 
+/** Raised yellow circle; pops up from the bar whenever a tab becomes active. */
+function NavActiveBubble({ icon }: { icon: IonName }) {
+  const pop = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    Animated.spring(pop, {
+      toValue: 1,
+      useNativeDriver: true,
+      damping: 13,
+      stiffness: 190,
+      mass: 0.8,
+    }).start();
+  }, [pop]);
+
+  const ringStyle = {
+    opacity: pop.interpolate({ inputRange: [0, 0.4, 1], outputRange: [0, 1, 1] }),
+    transform: [
+      { translateY: pop.interpolate({ inputRange: [0, 1], outputRange: [18, 0] }) },
+      { scale: pop.interpolate({ inputRange: [0, 1], outputRange: [0.55, 1] }) },
+    ],
+  };
+  const iconStyle = {
+    transform: [
+      { scale: pop.interpolate({ inputRange: [0, 0.6, 1], outputRange: [0.4, 1.12, 1] }) },
+      { rotate: pop.interpolate({ inputRange: [0, 1], outputRange: ["-14deg", "0deg"] }) },
+    ],
+  };
+
+  return (
+    <Animated.View style={[styles.navActiveRing, ringStyle]}>
+      <View style={styles.navActiveCircle}>
+        <Animated.View style={iconStyle}>
+          <Ionicons name={icon} size={26} color={COLORS.ink} />
+        </Animated.View>
+      </View>
+    </Animated.View>
+  );
+}
+
 export function NavBar({
   active,
   onSelect,
@@ -255,36 +375,41 @@ export function NavBar({
   bottomInset: number;
 }) {
   return (
-    <View style={[styles.navWrap, { paddingBottom: Math.max(bottomInset, 10) + 4 }]}>
-      <View style={[styles.navPill, SHADOW]}>
-        {NAV_ITEMS.map((item) => {
-          const isActive = item.id === active;
-          return (
-            <Tap
-              key={item.id}
-              style={styles.navTab}
-              scaleTo={0.92}
-              accessibilityRole="tab"
-              accessibilityLabel={item.label}
-              accessibilityState={{ selected: isActive }}
-              onPress={() => onSelect(item.id)}
-            >
-              {isActive ? (
-                <View style={styles.navActiveCircle}>
-                  <Ionicons name={item.iconActive} size={23} color={COLORS.ink} />
-                  <Txt style={[styles.navLabel, { color: COLORS.ink, fontFamily: FONTS.semibold }]}>
-                    {item.label}
-                  </Txt>
-                </View>
-              ) : (
-                <View style={styles.navInactive}>
-                  <Ionicons name={item.icon} size={22} color={COLORS.ink} />
-                  <Txt style={[styles.navLabel, { color: COLORS.inkSoft }]}>{item.label}</Txt>
-                </View>
-              )}
-            </Tap>
-          );
-        })}
+    <View style={styles.navWrap}>
+      <View style={{ height: NAV_PILL_H + NAV_LIFT + bottomInset }}>
+        <View style={[styles.navPill, SHADOW, { height: NAV_PILL_H + bottomInset }]} />
+        <View style={styles.navRow}>
+          {NAV_ITEMS.map((item) => {
+            const isActive = item.id === active;
+            return (
+              <Tap
+                key={item.id}
+                style={styles.navTab}
+                scaleTo={0.94}
+                accessibilityRole="tab"
+                accessibilityLabel={item.label}
+                accessibilityState={{ selected: isActive }}
+                onPress={() => onSelect(item.id)}
+              >
+                {isActive ? (
+                  <NavActiveBubble icon={item.iconActive} />
+                ) : (
+                  <Ionicons name={item.icon} size={23} color={COLORS.ink} />
+                )}
+                <Txt
+                  style={[
+                    styles.navLabel,
+                    isActive
+                      ? { color: COLORS.ink, fontFamily: FONTS.bold }
+                      : { color: COLORS.inkSoft },
+                  ]}
+                >
+                  {item.label}
+                </Txt>
+              </Tap>
+            );
+          })}
+        </View>
       </View>
     </View>
   );
@@ -308,8 +433,11 @@ export function ChatBubble({
   wide?: boolean;
 }) {
   const isUser = variant === "user";
+  const enter = useEnterStyle(isUser ? "fromRight" : "fromLeft");
   return (
-    <View style={[styles.bubbleRow, { justifyContent: isUser ? "flex-end" : "flex-start" }]}>
+    <Animated.View
+      style={[styles.bubbleRow, { justifyContent: isUser ? "flex-end" : "flex-start" }, enter]}
+    >
       <View
         style={[
           styles.bubble,
@@ -335,18 +463,19 @@ export function ChatBubble({
           </Txt>
         ) : null}
       </View>
-    </View>
+    </Animated.View>
   );
 }
 
 /** Small centered label pill, e.g. "today". */
 export function DayPill({ label }: { label: string }) {
+  const enter = useEnterStyle("pop");
   return (
-    <View style={styles.dayPillWrap}>
+    <Animated.View style={[styles.dayPillWrap, enter]}>
       <View style={styles.dayPill}>
         <Txt style={[TYPE.label, { color: COLORS.white, fontFamily: FONTS.semibold }]}>{label}</Txt>
       </View>
-    </View>
+    </Animated.View>
   );
 }
 
@@ -400,6 +529,7 @@ export function ListRow({
   accessibilityLabel?: string;
 }) {
   return (
+    <Enter>
     <Tap
       onPress={onPress}
       scaleTo={0.985}
@@ -407,7 +537,7 @@ export function ListRow({
       style={[
         styles.row,
         SHADOW,
-        dimmed && { backgroundColor: COLORS.whiteTint },
+        dimmed && { backgroundColor: COLORS.whiteSoft },
         selected && styles.rowSelected,
       ]}
     >
@@ -424,6 +554,7 @@ export function ListRow({
       </View>
       {trailing}
     </Tap>
+    </Enter>
   );
 }
 
@@ -440,14 +571,16 @@ export function MenuRow({
   right?: string;
 }) {
   return (
-    <Tap onPress={onPress} scaleTo={0.985} style={[styles.menuRow, SHADOW]} accessibilityLabel={label}>
-      <Ionicons name={icon} size={21} color={COLORS.ink} style={{ width: 28 }} />
-      <Txt style={[{ fontFamily: FONTS.medium, fontSize: 15, flex: 1 }]}>{label}</Txt>
-      {right ? (
-        <Txt style={[TYPE.sub, { color: COLORS.inkMuted, marginRight: 6 }]}>{right}</Txt>
-      ) : null}
-      <Ionicons name="chevron-forward" size={20} color={COLORS.ink} />
-    </Tap>
+    <Enter>
+      <Tap onPress={onPress} scaleTo={0.985} style={[styles.menuRow, SHADOW]} accessibilityLabel={label}>
+        <Ionicons name={icon} size={21} color={COLORS.ink} style={{ width: 28 }} />
+        <Txt style={[{ fontFamily: FONTS.medium, fontSize: 15, flex: 1 }]}>{label}</Txt>
+        {right ? (
+          <Txt style={[TYPE.sub, { color: COLORS.inkMuted, marginRight: 6 }]}>{right}</Txt>
+        ) : null}
+        <Ionicons name="chevron-forward" size={20} color={COLORS.ink} />
+      </Tap>
+    </Enter>
   );
 }
 
@@ -506,8 +639,9 @@ export function SegmentedToggle<T extends string>({
   value: T;
   onChange: (id: T) => void;
 }) {
+  const enter = useEnterStyle();
   return (
-    <View style={[styles.segment, SHADOW]}>
+    <Animated.View style={[styles.segment, SHADOW, enter]}>
       {options.map((opt) => {
         const active = opt.id === value;
         return (
@@ -531,7 +665,7 @@ export function SegmentedToggle<T extends string>({
           </Tap>
         );
       })}
-    </View>
+    </Animated.View>
   );
 }
 
@@ -562,24 +696,25 @@ export function Button({
     variant === "primary" ? COLORS.accent : variant === "dark" ? COLORS.ink : COLORS.white;
   const fg = variant === "dark" ? COLORS.white : COLORS.ink;
   return (
-    <Tap
-      onPress={onPress}
-      disabled={disabled || loading}
-      accessibilityLabel={label}
-      style={[
-        styles.button,
-        SHADOW,
-        { backgroundColor: bg, height: small ? 46 : 56, opacity: disabled ? 0.45 : 1 },
-        style,
-      ]}
-    >
-      {icon ? (
-        <Ionicons name={icon} size={20} color={fg} style={{ marginRight: 8 }} />
-      ) : null}
-      <Txt style={{ fontFamily: FONTS.bold, fontSize: small ? 15 : 17, color: fg }}>
-        {loading ? "Please wait…" : label}
-      </Txt>
-    </Tap>
+    <Enter style={style}>
+      <Tap
+        onPress={onPress}
+        disabled={disabled || loading}
+        accessibilityLabel={label}
+        style={[
+          styles.button,
+          SHADOW,
+          { backgroundColor: bg, height: small ? 46 : 56, opacity: disabled ? 0.45 : 1 },
+        ]}
+      >
+        {icon ? (
+          <Ionicons name={icon} size={20} color={fg} style={{ marginRight: 8 }} />
+        ) : null}
+        <Txt style={{ fontFamily: FONTS.bold, fontSize: small ? 15 : 17, color: fg }}>
+          {loading ? "Please wait…" : label}
+        </Txt>
+      </Tap>
+    </Enter>
   );
 }
 
@@ -594,7 +729,8 @@ export function Card({
   children: React.ReactNode;
   style?: StyleProp<ViewStyle>;
 }) {
-  return <View style={[styles.card, SHADOW, style]}>{children}</View>;
+  const enter = useEnterStyle();
+  return <Animated.View style={[styles.card, SHADOW, style, enter]}>{children}</Animated.View>;
 }
 
 /** Big square action tile for the Home grid. */
@@ -610,18 +746,20 @@ export function ActionTile({
   onPress: () => void;
 }) {
   return (
-    <Tap
-      onPress={onPress}
-      accessibilityLabel={label}
-      style={[
-        styles.tile,
-        SHADOW,
-        { backgroundColor: tinted ? COLORS.whiteTint : COLORS.white },
-      ]}
-    >
-      {children}
-      <Txt style={[TYPE.rowTitle, { fontSize: 16, marginTop: 14 }]}>{label}</Txt>
-    </Tap>
+    <Enter kind="pop" style={{ flex: 1 }}>
+      <Tap
+        onPress={onPress}
+        accessibilityLabel={label}
+        style={[
+          styles.tile,
+          SHADOW,
+          { backgroundColor: tinted ? COLORS.whiteSoft : COLORS.white },
+        ]}
+      >
+        {children}
+        <Txt style={[TYPE.rowTitle, { fontSize: 16, marginTop: 14 }]}>{label}</Txt>
+      </Tap>
+    </Enter>
   );
 }
 
@@ -668,8 +806,9 @@ export function SearchBar({
   right?: React.ReactNode;
   autoFocus?: boolean;
 }) {
+  const enter = useEnterStyle();
   return (
-    <View style={[styles.searchBar, SHADOW]}>
+    <Animated.View style={[styles.searchBar, SHADOW, enter]}>
       <Ionicons name="search" size={21} color={COLORS.inkSoft} />
       <Input
         value={value}
@@ -680,7 +819,7 @@ export function SearchBar({
         returnKeyType="search"
       />
       {right}
-    </View>
+    </Animated.View>
   );
 }
 
@@ -702,8 +841,9 @@ export function Composer({
   editable?: boolean;
   multiline?: boolean;
 }) {
+  const enter = useEnterStyle("rise");
   return (
-    <View style={[styles.composer, SHADOW]}>
+    <Animated.View style={[styles.composer, SHADOW, enter]}>
       <Input
         value={value}
         onChangeText={onChangeText}
@@ -716,7 +856,7 @@ export function Composer({
         style={{ flex: 1, fontSize: 16, maxHeight: 96, paddingVertical: 4 }}
       />
       {trailing}
-    </View>
+    </Animated.View>
   );
 }
 
@@ -979,18 +1119,93 @@ export function Waveform({ levels, slots = 38 }: { levels: number[]; slots?: num
 /* Simple fade-in for screen transitions                               */
 /* ------------------------------------------------------------------ */
 
-export function FadeIn({ children, triggerKey }: { children: React.ReactNode; triggerKey: string }) {
-  const opacity = useRef(new Animated.Value(0)).current;
-  useEffect(() => {
-    opacity.setValue(0);
-    Animated.timing(opacity, {
-      toValue: 1,
-      duration: 180,
-      easing: Easing.out(Easing.quad),
-      useNativeDriver: true,
-    }).start();
-  }, [triggerKey, opacity]);
-  return <Animated.View style={{ flex: 1, opacity }}>{children}</Animated.View>;
+export type TransitionDirection = "forward" | "back" | "tab";
+
+const SCREEN_EASE = Easing.bezier(0.16, 1, 0.3, 1);
+
+/**
+ * Screen enter animation driven by one 0→1 progress value with keyframed
+ * interpolations: opening a screen slides in from the right, going back from
+ * the left, and switching tabs rises up with a gentle scale.
+ */
+export function ScreenTransition({
+  children,
+  triggerKey,
+  direction,
+}: {
+  children: React.ReactNode;
+  triggerKey: string;
+  direction: TransitionDirection;
+}) {
+  const progress = useRef(new Animated.Value(1)).current;
+  const stagger = useRef(new Animated.Value(1)).current;
+  const counter = useRef(0);
+  const lastKey = useRef(triggerKey);
+  const first = useRef(true);
+
+  // New screen: restart element numbering during this render so its children
+  // pick up their stagger order as they mount.
+  if (lastKey.current !== triggerKey) {
+    lastKey.current = triggerKey;
+    counter.current = 0;
+  }
+
+  const ctx = useRef<EnterContextValue>({
+    progress: stagger,
+    next: () => counter.current++,
+  }).current;
+
+  // Layout effect so values are reset before the new screen is painted (no flash).
+  useLayoutEffect(() => {
+    if (first.current) {
+      first.current = false;
+      return;
+    }
+    progress.setValue(0);
+    stagger.setValue(0);
+    Animated.parallel([
+      Animated.timing(progress, {
+        toValue: 1,
+        duration: direction === "tab" ? 420 : 460,
+        easing: SCREEN_EASE,
+        useNativeDriver: true,
+      }),
+      Animated.timing(stagger, {
+        toValue: 1,
+        duration: 820,
+        easing: Easing.linear,
+        useNativeDriver: true,
+      }),
+    ]).start();
+  }, [triggerKey, direction, progress, stagger]);
+
+  const opacity = progress.interpolate({
+    inputRange: [0, 0.35, 1],
+    outputRange: [0, 0.85, 1],
+  });
+  const shift = direction === "back" ? -42 : 42;
+  const translateX =
+    direction === "tab"
+      ? 0
+      : progress.interpolate({ inputRange: [0, 0.6, 1], outputRange: [shift, shift * 0.12, 0] });
+  const translateY =
+    direction === "tab"
+      ? progress.interpolate({ inputRange: [0, 0.6, 1], outputRange: [18, 2, 0] })
+      : 0;
+  const scale = progress.interpolate({
+    inputRange: [0, 0.7, 1],
+    outputRange: [direction === "tab" ? 0.965 : 0.985, 0.997, 1],
+  });
+
+  return (
+    <EnterContext.Provider value={ctx}>
+      <Animated.View
+        style={{ flex: 1, opacity, transform: [{ translateX }, { translateY }, { scale }] }}
+      >
+        {children}
+      </Animated.View>
+    </EnterContext.Provider>
+  );
 }
 
 /* ------------------------------------------------------------------ */
@@ -1033,27 +1248,51 @@ const styles = StyleSheet.create({
     minHeight: 48,
   },
 
-  navWrap: { paddingHorizontal: SPACING.md, paddingTop: 8, backgroundColor: COLORS.bg },
+  navWrap: { backgroundColor: COLORS.bg },
   navPill: {
-    height: 62,
-    borderRadius: RADIUS.pill,
-    backgroundColor: COLORS.white,
-    flexDirection: "row",
-    paddingHorizontal: 6,
-  },
-  navTab: { flex: 1, height: 62, alignItems: "center", justifyContent: "center" },
-  navInactive: { alignItems: "center", justifyContent: "center", gap: 3 },
-  navLabel: { fontFamily: FONTS.medium, fontSize: 10, lineHeight: 12 },
-  navActiveCircle: {
     position: "absolute",
-    top: -4,
-    width: 62,
-    height: 62,
-    borderRadius: 31,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    borderTopLeftRadius: 30,
+    borderTopRightRadius: 30,
+    backgroundColor: COLORS.white,
+  },
+  navRow: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    height: NAV_PILL_H + NAV_LIFT,
+    flexDirection: "row",
+    paddingHorizontal: 10,
+  },
+  navTab: {
+    flex: 1,
+    height: NAV_PILL_H + NAV_LIFT,
+    alignItems: "center",
+    justifyContent: "flex-end",
+    paddingBottom: 12,
+    gap: 3,
+  },
+  navLabel: { fontFamily: FONTS.medium, fontSize: 11, lineHeight: 14 },
+  // Page-coloured ring around the yellow circle makes it look scooped out of the bar.
+  navActiveRing: {
+    width: 68,
+    height: 68,
+    borderRadius: 34,
+    backgroundColor: COLORS.bg,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: -1,
+  },
+  navActiveCircle: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
     backgroundColor: COLORS.accent,
     alignItems: "center",
     justifyContent: "center",
-    gap: 2,
   },
 
   bubbleRow: { flexDirection: "row", marginBottom: 14 },

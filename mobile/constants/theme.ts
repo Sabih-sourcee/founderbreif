@@ -25,6 +25,8 @@ export const COLORS = {
 
   // #FFFFFF at reduced opacity (tinted tiles on the teal canvas)
   whiteTint: "rgba(255, 255, 255, 0.55)",
+  /** White at 55% over the page colour, but opaque, so elevated surfaces never show a shadow through. */
+  whiteSoft: "#EDFBF9",
   whiteOnInk: "rgba(255, 255, 255, 0.72)",
 
   // #1C2120 scrim behind bottom sheets
