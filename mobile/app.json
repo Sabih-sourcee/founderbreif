@@ -17,7 +17,7 @@
       "adaptiveIcon": {
         "backgroundColor": "#DAF7F3"
       },
-      "package": "com.founderbrief.app",
+      "package": "com.founderbreif.app",
       "permissions": [
         "RECORD_AUDIO",
         "android.permission.RECORD_AUDIO",
@@ -36,7 +36,7 @@
     "extra": {
       "apiUrl": "http://localhost:3000",
       "eas": {
-        "projectId": "c1d8b43a-3276-4987-ba7c-9f26836de165"
+        "projectId": "53e234a3-5c39-4a3f-9191-f0e6bdd480e6"
       }
     }
   }
