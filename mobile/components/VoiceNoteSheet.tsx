@@ -55,8 +55,13 @@ export default function VoiceNoteSheet({ visible, onClose, onTranscript }: Props
         onTranscript(text);
         onClose();
       }
-    } catch {
-      setError("Couldn't transcribe your recording. Check your connection and try again.");
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "";
+      setError(
+        message && message.length < 140
+          ? message
+          : "Couldn't transcribe your recording. Check your connection and try again."
+      );
     } finally {
       setBusy(false);
     }

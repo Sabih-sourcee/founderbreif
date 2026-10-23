@@ -12,7 +12,9 @@ import {
   useFonts,
 } from "@expo-google-fonts/inter";
 
+import { TourProvider } from "./components/Tour";
 import { COLORS, SHADOW } from "./constants/theme";
+import { TOUR_STORAGE_KEY } from "./constants/onboarding";
 import { getQuestions } from "./constants/questions";
 import {
   Card,
@@ -559,6 +561,7 @@ function AppShell() {
       saveRecentVoiceIds([]),
       saveSessionDraft(null),
       AsyncStorage.removeItem(PROFILE_PROMPTED_KEY),
+      AsyncStorage.removeItem(TOUR_STORAGE_KEY),
     ]);
     setBriefs([]);
     setProfile(EMPTY_PROFILE);
@@ -800,7 +803,32 @@ function AppShell() {
 
   const typeLabel = DOCUMENT_OUTPUT_TYPES.find((d) => d.id === docType)?.barLabel ?? "document";
 
+  const goTourScreen = useCallback(
+    (s: Screen) => {
+      switch (s) {
+        case "Home":
+          return resetTo("Home");
+        case "Record":
+          return resetTo("Record", ["Home"]);
+        case "Library":
+          return resetTo("Library", ["Home"]);
+        case "Profile":
+          return resetTo("Profile", ["Home"]);
+        case "ReadPick":
+          return resetTo("ReadPick", ["Home"]);
+        default:
+          return resetTo(s, ["Home"]);
+      }
+    },
+    [resetTo]
+  );
+
   return (
+    <TourProvider
+      currentScreen={screen}
+      goToScreen={goTourScreen}
+      ready={hydrated && promptedProfile}
+    >
     <View style={styles.root}>
       <StatusBar hidden={screen !== "Home"} style="dark" />
 
@@ -846,6 +874,7 @@ function AppShell() {
 
       <Toast message={toast} onClose={() => setToast("")} />
     </View>
+    </TourProvider>
   );
 }
 

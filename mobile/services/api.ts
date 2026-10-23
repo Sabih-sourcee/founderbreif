@@ -1,4 +1,5 @@
 import Constants from "expo-constants";
+import * as FileSystem from "expo-file-system/legacy";
 import {
   BriefAnswers,
   BriefApiResponse,
@@ -8,11 +9,13 @@ import {
 } from "../types";
 import { getDeviceId } from "./storage";
 
+const PRODUCTION_API = "https://founderbreif.vercel.app";
+
 export function getApiBaseUrl(): string {
   const fromEnv = process.env.EXPO_PUBLIC_API_URL;
   if (fromEnv) return fromEnv.replace(/\/$/, "");
   const fromExtra = Constants.expoConfig?.extra?.apiUrl as string | undefined;
-  return (fromExtra ?? "http://localhost:3000").replace(/\/$/, "");
+  return (fromExtra ?? PRODUCTION_API).replace(/\/$/, "");
 }
 
 async function apiHeaders(authToken?: string): Promise<Record<string, string>> {
@@ -113,24 +116,51 @@ export async function checkBackendHealth(): Promise<boolean> {
   }
 }
 
+function toFileUri(uri: string): string {
+  if (
+    uri.startsWith("file://") ||
+    uri.startsWith("content://") ||
+    uri.startsWith("http://") ||
+    uri.startsWith("https://")
+  ) {
+    return uri;
+  }
+  return `file://${uri}`;
+}
+
+function audioMimeFromUri(uri: string): string {
+  const name = uri.split("?")[0].toLowerCase();
+  if (name.endsWith(".wav")) return "audio/wav";
+  if (name.endsWith(".webm")) return "audio/webm";
+  if (name.endsWith(".3gp") || name.endsWith(".3gpp")) return "audio/3gpp";
+  if (name.endsWith(".mp3")) return "audio/mpeg";
+  return "audio/mp4";
+}
+
 export async function transcribeVoiceRecording(audioUri: string): Promise<string> {
-  const formData = new FormData();
-  const filename = audioUri.split("/").pop() ?? "recording.m4a";
-  formData.append("audio", {
-    uri: audioUri,
-    name: filename,
-    type: "audio/mp4",
-  } as unknown as Blob);
+  const fileUri = toFileUri(audioUri);
+  const audioBase64 = await FileSystem.readAsStringAsync(fileUri, {
+    encoding: FileSystem.EncodingType.Base64,
+  });
+  if (!audioBase64) {
+    throw new Error("The recording file was empty. Tap the mic and try again.");
+  }
 
   const baseUrl = getApiBaseUrl();
   const response = await fetch(`${baseUrl}/api/transcribe-voice`, {
     method: "POST",
-    body: formData,
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      audioBase64,
+      mimeType: audioMimeFromUri(fileUri),
+    }),
   });
 
-  const data = await response.json();
+  const data = await response.json().catch(() => ({}));
   if (!response.ok) {
-    throw new Error(data.error ?? `Transcription failed (${response.status})`);
+    throw new Error(
+      typeof data.error === "string" ? data.error : `Transcription failed (${response.status})`
+    );
   }
-  return data.text as string;
+  return typeof data.text === "string" ? data.text : "";
 }

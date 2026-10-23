@@ -14,6 +14,7 @@ import {
   TYPE,
   Txt,
 } from "../components/kit";
+import { TourAnchor } from "../components/Tour";
 import { ProjectBrief } from "../types";
 import { estimateReadSeconds, formatClock, shortDate, stripMarkdown } from "../utils/text";
 
@@ -43,16 +44,18 @@ export default function ReadPickScreen({ briefs, onChoose, onBack }: Props) {
     <ScreenFrame>
       <TopBar title="Read Aloud" left="back" onLeft={onBack} />
 
-      <View style={{ marginTop: 16 }}>
-        <SegmentedToggle<Source>
-          options={[
-            { id: "paste", label: "Paste text" },
-            { id: "library", label: "From Library" },
-          ]}
-          value={source}
-          onChange={setSource}
-        />
-      </View>
+      <TourAnchor id="read.source">
+        <View style={{ marginTop: 16 }}>
+          <SegmentedToggle<Source>
+            options={[
+              { id: "paste", label: "Paste text" },
+              { id: "library", label: "From Library" },
+            ]}
+            value={source}
+            onChange={setSource}
+          />
+        </View>
+      </TourAnchor>
 
       {source === "paste" ? (
         <KeyboardAvoidingView

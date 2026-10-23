@@ -4,6 +4,7 @@ import {
   Easing,
   Image,
   KeyboardAvoidingView,
+  Modal,
   Platform,
   Pressable,
   StyleProp,
@@ -20,6 +21,7 @@ import { Ionicons, MaterialCommunityIcons, MaterialIcons } from "@expo/vector-ic
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { COLORS, FONTS, RADIUS, SHADOW, SPACING } from "../constants/theme";
 import { TabId } from "../types";
+import { TourAnchor, useTour } from "./Tour";
 
 /* ------------------------------------------------------------------ */
 /* Typography                                                          */
@@ -374,8 +376,10 @@ export function NavBar({
   onSelect: (tab: TabId) => void;
   bottomInset: number;
 }) {
+  const tour = useTour();
   return (
     <View style={styles.navWrap}>
+      <TourAnchor id="nav.bar">
       <View style={{ height: NAV_PILL_H + NAV_LIFT + bottomInset }}>
         <View style={[styles.navPill, SHADOW, { height: NAV_PILL_H + bottomInset }]} />
         <View style={styles.navRow}>
@@ -389,7 +393,9 @@ export function NavBar({
                 accessibilityRole="tab"
                 accessibilityLabel={item.label}
                 accessibilityState={{ selected: isActive }}
-                onPress={() => onSelect(item.id)}
+                onPress={() => {
+                  if (!tour.active) onSelect(item.id);
+                }}
               >
                 {isActive ? (
                   <NavActiveBubble icon={item.iconActive} />
@@ -411,6 +417,7 @@ export function NavBar({
           })}
         </View>
       </View>
+      </TourAnchor>
     </View>
   );
 }
@@ -746,7 +753,7 @@ export function ActionTile({
   onPress: () => void;
 }) {
   return (
-    <Enter kind="pop" style={{ flex: 1 }}>
+    <Enter kind="pop" style={{ flex: 1, width: "100%" }}>
       <Tap
         onPress={onPress}
         accessibilityLabel={label}
@@ -955,58 +962,86 @@ export function Sheet({
   onClose: () => void;
   children: React.ReactNode;
 }) {
-  const slide = useRef(new Animated.Value(0)).current;
+  const insets = useSafeAreaInsets();
+  const progress = useRef(new Animated.Value(0)).current;
   const [mounted, setMounted] = useState(visible);
 
   useEffect(() => {
     if (visible) {
       setMounted(true);
-      Animated.timing(slide, {
+      progress.setValue(0);
+      Animated.spring(progress, {
         toValue: 1,
-        duration: 240,
-        easing: Easing.out(Easing.cubic),
+        damping: 22,
+        stiffness: 260,
+        mass: 0.85,
         useNativeDriver: true,
       }).start();
-    } else if (mounted) {
-      Animated.timing(slide, {
-        toValue: 0,
-        duration: 170,
-        easing: Easing.in(Easing.cubic),
-        useNativeDriver: true,
-      }).start(() => setMounted(false));
+      return;
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visible]);
-
-  if (!mounted) return null;
+    Animated.timing(progress, {
+      toValue: 0,
+      duration: 180,
+      easing: Easing.out(Easing.quad),
+      useNativeDriver: true,
+    }).start(({ finished }) => {
+      if (finished) setMounted(false);
+    });
+  }, [visible, progress]);
 
   return (
-    <KeyboardAvoidingView
-      style={StyleSheet.absoluteFill}
-      behavior="padding"
-      pointerEvents="box-none"
+    <Modal
+      visible={mounted}
+      transparent
+      animationType="none"
+      statusBarTranslucent
+      onRequestClose={onClose}
     >
-      <Animated.View
-        style={[StyleSheet.absoluteFill, { backgroundColor: COLORS.scrim, opacity: slide }]}
-      >
-        <Pressable style={{ flex: 1 }} onPress={onClose} accessibilityLabel="Dismiss" />
-      </Animated.View>
-      <View style={styles.sheetAnchor} pointerEvents="box-none">
-        <Animated.View
-          style={[
-            styles.sheet,
-            SHADOW,
-            {
-              transform: [
-                { translateY: slide.interpolate({ inputRange: [0, 1], outputRange: [340, 0] }) },
-              ],
-            },
-          ]}
+      <View style={styles.sheetRoot}>
+        <Pressable
+          style={StyleSheet.absoluteFill}
+          onPress={onClose}
+          accessibilityLabel="Dismiss"
         >
-          {children}
-        </Animated.View>
+          <Animated.View
+            style={[StyleSheet.absoluteFill, { backgroundColor: COLORS.scrim, opacity: progress }]}
+          />
+        </Pressable>
+
+        <KeyboardAvoidingView
+          behavior={Platform.OS === "ios" ? "padding" : undefined}
+          pointerEvents="box-none"
+          style={[styles.sheetAnchor, { paddingBottom: Math.max(insets.bottom, 14) }]}
+        >
+          <Animated.View
+            style={[
+              styles.sheet,
+              SHADOW,
+              {
+                opacity: progress,
+                transform: [
+                  {
+                    translateY: progress.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [36, 0],
+                    }),
+                  },
+                  {
+                    scale: progress.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [0.96, 1],
+                    }),
+                  },
+                ],
+              },
+            ]}
+          >
+            <View style={styles.sheetHandle} />
+            {children}
+          </Animated.View>
+        </KeyboardAvoidingView>
       </View>
-    </KeyboardAvoidingView>
+    </Modal>
   );
 }
 
@@ -1399,11 +1434,21 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
   },
 
-  sheetAnchor: { flex: 1, justifyContent: "flex-end", paddingHorizontal: 12, paddingBottom: 10 },
+  sheetRoot: { flex: 1, justifyContent: "flex-end" },
+  sheetAnchor: { justifyContent: "flex-end", paddingHorizontal: 12 },
   sheet: {
     backgroundColor: COLORS.white,
     borderRadius: RADIUS.card + 4,
     padding: 20,
+    paddingTop: 12,
+  },
+  sheetHandle: {
+    alignSelf: "center",
+    width: 36,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: COLORS.inkFaint,
+    marginBottom: 14,
   },
   sheetOption: {
     flexDirection: "row",

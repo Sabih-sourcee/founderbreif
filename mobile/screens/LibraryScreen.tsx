@@ -18,6 +18,7 @@ import {
   TYPE,
   Txt,
 } from "../components/kit";
+import { TourAnchor } from "../components/Tour";
 import { ProjectBrief } from "../types";
 import { formatClock, shortDate } from "../utils/text";
 
@@ -81,20 +82,22 @@ export default function LibraryScreen({ briefs, onOpen, onReadAloud, onDelete, o
 
   return (
     <ScreenFrame>
-      <ScreenTitle
-        title="Library"
-        right={
-          <CircleButton
-            onPress={() => {
-              if (searching) setQuery("");
-              setSearching((s) => !s);
-            }}
-            accessibilityLabel={searching ? "Close search" : "Search library"}
-          >
-            <Ionicons name={searching ? "close" : "search"} size={22} color={COLORS.ink} />
-          </CircleButton>
-        }
-      />
+      <TourAnchor id="library.search">
+        <ScreenTitle
+          title="Library"
+          right={
+            <CircleButton
+              onPress={() => {
+                if (searching) setQuery("");
+                setSearching((s) => !s);
+              }}
+              accessibilityLabel={searching ? "Close search" : "Search library"}
+            >
+              <Ionicons name={searching ? "close" : "search"} size={22} color={COLORS.ink} />
+            </CircleButton>
+          }
+        />
+      </TourAnchor>
 
       {searching ? (
         <View style={{ marginTop: 12 }}>

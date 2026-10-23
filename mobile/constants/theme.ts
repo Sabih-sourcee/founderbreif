@@ -29,8 +29,8 @@ export const COLORS = {
   whiteSoft: "#EDFBF9",
   whiteOnInk: "rgba(255, 255, 255, 0.72)",
 
-  // #1C2120 scrim behind bottom sheets
-  scrim: "rgba(28, 33, 32, 0.30)",
+  // Soft ink veil — teal still reads through; never a muddy gray slab
+  scrim: "rgba(28, 33, 32, 0.16)",
 } as const;
 
 export const SPACING = {
@@ -53,17 +53,21 @@ export const RADIUS = {
   tail: 6, // chat bubble tail corner
 } as const;
 
-/** One shadow for every elevated surface, identical on every screen. */
+/** One lift for every elevated surface — airy on teal, never a gray fringe. */
 export const SHADOW: ViewStyle = Platform.select<ViewStyle>({
   ios: {
     shadowColor: "#1C2120",
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.1,
-    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.06,
+    shadowRadius: 18,
+    borderWidth: 1,
+    borderColor: "rgba(28, 33, 32, 0.04)",
   },
   android: {
-    elevation: 5,
+    elevation: 1,
     shadowColor: "#1C2120",
+    borderWidth: 1,
+    borderColor: "rgba(28, 33, 32, 0.05)",
   },
   default: {},
 }) as ViewStyle;

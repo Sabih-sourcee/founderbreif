@@ -82,8 +82,13 @@ export default function QuestionsScreen({
         const text = (await transcribeVoiceRecording(uri)).trim();
         if (text) setDraft((d) => (d ? `${d} ${text}` : text));
         else onNotice("We couldn't hear any speech. Try again or type your answer.");
-      } catch {
-        onNotice("Couldn't transcribe that. Check your connection or type your answer.");
+      } catch (e) {
+        const message = e instanceof Error ? e.message : "";
+        onNotice(
+          message && message.length < 140
+            ? message
+            : "Couldn't transcribe that. Check your connection or type your answer."
+        );
       } finally {
         setTranscribing(false);
       }

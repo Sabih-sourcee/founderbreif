@@ -19,6 +19,7 @@ import {
   TYPE,
   Txt,
 } from "../components/kit";
+import { TourAnchor, useTour } from "../components/Tour";
 import { ExportDocFormat, SPOKEN_LANGUAGES, UserPreferences, UserProfile } from "../types";
 
 interface Props {
@@ -63,6 +64,7 @@ export default function ProfileScreen({
   const [signInError, setSignInError] = useState("");
   const [signingIn, setSigningIn] = useState(false);
   const [restoring, setRestoring] = useState(false);
+  const tour = useTour();
 
   const close = () => setSheet(null);
   const hasName = profile.name.trim().length > 0;
@@ -144,22 +146,24 @@ export default function ProfileScreen({
           </Txt>
         </Tap>
 
-        <Card style={styles.planCard}>
-          <Txt style={[TYPE.sub, { color: COLORS.inkMuted }]}>Current Plan</Txt>
-          <Txt style={styles.planName}>{isPro ? "Pro Plan" : "Free Plan"}</Txt>
-          <ProgressBar progress={progress} height={10} style={{ marginTop: 14 }} />
-          <Txt style={[TYPE.sub, { color: COLORS.inkMuted, marginTop: 8 }]}>
-            {unlimited
-              ? "Unlimited documents and read-alouds"
-              : `${usage.used} of ${usage.limit} used this month`}
-          </Txt>
-          <Button
-            label={isPro ? "Manage Subscription" : "Upgrade to Pro"}
-            variant="dark"
-            onPress={isPro ? onManageSubscription : onUpgrade}
-            style={{ marginTop: 18 }}
-          />
-        </Card>
+        <TourAnchor id="profile.plan">
+          <Card style={styles.planCard}>
+            <Txt style={[TYPE.sub, { color: COLORS.inkMuted }]}>Current Plan</Txt>
+            <Txt style={styles.planName}>{isPro ? "Pro Plan" : "Free Plan"}</Txt>
+            <ProgressBar progress={progress} height={10} style={{ marginTop: 14 }} />
+            <Txt style={[TYPE.sub, { color: COLORS.inkMuted, marginTop: 8 }]}>
+              {unlimited
+                ? "Unlimited documents and read-alouds"
+                : `${usage.used} of ${usage.limit} used this month`}
+            </Txt>
+            <Button
+              label={isPro ? "Manage Subscription" : "Upgrade to Pro"}
+              variant="dark"
+              onPress={isPro ? onManageSubscription : onUpgrade}
+              style={{ marginTop: 18 }}
+            />
+          </Card>
+        </TourAnchor>
 
         <View style={{ marginTop: 20 }}>
           <MenuRow
@@ -267,6 +271,13 @@ export default function ProfileScreen({
           it read aloud. Free accounts can create 3 documents each month.
         </Txt>
         <View style={{ gap: 12 }}>
+          <Button
+            label="Show me around"
+            onPress={() => {
+              close();
+              tour.start();
+            }}
+          />
           <Button
             label="Restore purchases"
             variant="secondary"

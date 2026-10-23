@@ -15,6 +15,7 @@ import {
   TYPE,
   Txt,
 } from "../components/kit";
+import { TourAnchor, useTour } from "../components/Tour";
 import { TabId } from "../types";
 import { firstName } from "../utils/text";
 
@@ -51,14 +52,17 @@ export default function HomeScreen({
 }: Props) {
   const [bellOpen, setBellOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
+  const tour = useTour();
   const who = firstName(name) || "there";
 
   return (
     <ScreenFrame>
       <View style={styles.topRow}>
-        <CircleButton onPress={() => setHelpOpen(true)} accessibilityLabel="Help">
-          <Ionicons name="help" size={24} color={COLORS.ink} />
-        </CircleButton>
+        <TourAnchor id="home.help">
+          <CircleButton onPress={() => setHelpOpen(true)} accessibilityLabel="Help">
+            <Ionicons name="help" size={24} color={COLORS.ink} />
+          </CircleButton>
+        </TourAnchor>
         <CircleButton
           onPress={() => setBellOpen(true)}
           dot={notifications.length > 0}
@@ -79,20 +83,28 @@ export default function HomeScreen({
 
         <View style={styles.grid}>
           <View style={styles.gridRow}>
-            <ActionTile label="Record" tinted onPress={() => onNavigate("Record")}>
-              <Ionicons name="mic-outline" size={46} color={COLORS.ink} />
-            </ActionTile>
-            <ActionTile label="Read Aloud" onPress={() => onNavigate("ReadAloud")}>
-              <Ionicons name="volume-high-outline" size={46} color={COLORS.ink} />
-            </ActionTile>
+            <TourAnchor id="home.record" style={{ flex: 1 }}>
+              <ActionTile label="Record" tinted onPress={() => onNavigate("Record")}>
+                <Ionicons name="mic-outline" size={46} color={COLORS.ink} />
+              </ActionTile>
+            </TourAnchor>
+            <TourAnchor id="home.read" style={{ flex: 1 }}>
+              <ActionTile label="Read Aloud" onPress={() => onNavigate("ReadAloud")}>
+                <Ionicons name="volume-high-outline" size={46} color={COLORS.ink} />
+              </ActionTile>
+            </TourAnchor>
           </View>
           <View style={styles.gridRow}>
-            <ActionTile label="Library" onPress={() => onNavigate("Library")}>
-              <MaterialCommunityIcons name="folder-text-outline" size={46} color={COLORS.ink} />
-            </ActionTile>
-            <ActionTile label="Profile" tinted onPress={() => onNavigate("Profile")}>
-              <Ionicons name="person-outline" size={46} color={COLORS.ink} />
-            </ActionTile>
+            <TourAnchor id="home.library" style={{ flex: 1 }}>
+              <ActionTile label="Library" onPress={() => onNavigate("Library")}>
+                <MaterialCommunityIcons name="folder-text-outline" size={46} color={COLORS.ink} />
+              </ActionTile>
+            </TourAnchor>
+            <TourAnchor id="home.profile" style={{ flex: 1 }}>
+              <ActionTile label="Profile" tinted onPress={() => onNavigate("Profile")}>
+                <Ionicons name="person-outline" size={46} color={COLORS.ink} />
+              </ActionTile>
+            </TourAnchor>
           </View>
         </View>
       </ScrollView>
@@ -136,6 +148,15 @@ export default function HomeScreen({
             </View>
           </View>
         ))}
+        <Tap
+          onPress={() => {
+            setHelpOpen(false);
+            tour.start();
+          }}
+          style={[styles.helpLink, { backgroundColor: COLORS.accent, marginBottom: 10 }]}
+        >
+          <Txt style={{ fontFamily: FONTS.bold, fontSize: 14 }}>Show me around</Txt>
+        </Tap>
         <Tap
           onPress={() => {
             setHelpOpen(false);

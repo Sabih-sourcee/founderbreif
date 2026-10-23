@@ -17,6 +17,7 @@ import {
   TYPE,
   Txt,
 } from "../components/kit";
+import { TourAnchor } from "../components/Tour";
 import {
   DOCUMENT_OUTPUT_TYPES,
   DocumentOutputType,
@@ -104,14 +105,16 @@ export default function RecordScreen({
 
           {!hasIdea ? (
             <View style={styles.micBlock}>
-              <Tap
-                onPress={() => setVoiceOpen(true)}
-                scaleTo={0.94}
-                style={styles.bigMic}
-                accessibilityLabel="Start voice note"
-              >
-                <Ionicons name="mic" size={56} color={COLORS.ink} />
-              </Tap>
+              <TourAnchor id="record.mic">
+                <Tap
+                  onPress={() => setVoiceOpen(true)}
+                  scaleTo={0.94}
+                  style={styles.bigMic}
+                  accessibilityLabel="Start voice note"
+                >
+                  <Ionicons name="mic" size={56} color={COLORS.ink} />
+                </Tap>
+              </TourAnchor>
               <Txt style={[TYPE.body, { color: COLORS.inkMuted, marginTop: 16, textAlign: "center" }]}>
                 Tap the mic to start talking
               </Txt>
@@ -168,25 +171,33 @@ export default function RecordScreen({
           )}
         </ScrollView>
 
-        <View style={styles.composerWrap}>
-          <Composer
-            value={draft}
-            onChangeText={setDraft}
-            placeholder={hasIdea ? "Add more detail…" : "Describe your idea…"}
-            onSubmit={submit}
-            trailing={
-              draft.trim() ? (
-                <AccentCircle onPress={submit} accessibilityLabel="Send">
-                  <Ionicons name="arrow-up" size={22} color={COLORS.ink} />
-                </AccentCircle>
-              ) : (
-                <AccentCircle onPress={() => setVoiceOpen(true)} accessibilityLabel="Record voice note">
-                  <Ionicons name="mic" size={22} color={COLORS.ink} />
-                </AccentCircle>
-              )
-            }
-          />
-        </View>
+        <TourAnchor id="record.composer">
+          <View style={styles.composerWrap}>
+            <Composer
+              value={draft}
+              onChangeText={setDraft}
+              placeholder={hasIdea ? "Add more detail…" : "Describe your idea…"}
+              onSubmit={submit}
+              trailing={
+                draft.trim() ? (
+                  <AccentCircle onPress={submit} accessibilityLabel="Send">
+                    <Ionicons name="arrow-up" size={22} color={COLORS.ink} />
+                  </AccentCircle>
+                ) : hasIdea ? (
+                  <TourAnchor id="record.mic">
+                    <AccentCircle onPress={() => setVoiceOpen(true)} accessibilityLabel="Record voice note">
+                      <Ionicons name="mic" size={22} color={COLORS.ink} />
+                    </AccentCircle>
+                  </TourAnchor>
+                ) : (
+                  <AccentCircle onPress={() => setVoiceOpen(true)} accessibilityLabel="Record voice note">
+                    <Ionicons name="mic" size={22} color={COLORS.ink} />
+                  </AccentCircle>
+                )
+              }
+            />
+          </View>
+        </TourAnchor>
       </KeyboardAvoidingView>
 
       <VoiceNoteSheet
