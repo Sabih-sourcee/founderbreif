@@ -25,7 +25,12 @@ export function appUrl(): string {
 }
 
 export function appSupabaseUrl(): string | undefined {
-  return process.env.APP_SUPABASE_URL || process.env.LANDING_SUPABASE_URL;
+  return (
+    process.env.APP_SUPABASE_URL ||
+    process.env.SUPABASE_URL ||
+    process.env.VITE_SUPABASE_URL ||
+    process.env.LANDING_SUPABASE_URL
+  );
 }
 
 export function appSupabaseServiceKey(): string | undefined {

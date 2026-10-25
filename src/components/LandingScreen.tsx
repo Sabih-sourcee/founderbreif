@@ -53,7 +53,7 @@ const SOUTH_ASIAN_TEMPLATES: {
   },
 ];
 
-export default function LandingScreen({
+export function LandingScreen({
   userName = "Founder",
   isPro = false,
   savedBriefsCount = 0,

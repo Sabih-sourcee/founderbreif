@@ -43,9 +43,10 @@ export async function transcribeAudio(base64: string, mimeType: string) {
         parts: [
           { inlineData: { mimeType, data: base64 } },
           {
-            text: `Transcribe the founder's spoken startup product idea from this audio.
+            text: `Transcribe the spoken words in this audio.
 Return ONLY the transcription as plain text — no labels, no commentary.
-Preserve mixed languages if spoken.`,
+Preserve mixed languages (Urdu, Hindi, Arabic, Roman Urdu, Hinglish, and English) exactly as spoken.
+If there is no intelligible speech, respond with exactly: EMPTY`,
           },
         ],
       },
@@ -53,6 +54,6 @@ Preserve mixed languages if spoken.`,
   });
 
   const text = response.text?.trim();
-  if (!text) throw new Error("Could not transcribe audio.");
-  return text.slice(0, 500);
+  if (!text || text === "EMPTY") throw new Error("Could not transcribe audio.");
+  return text.slice(0, 1500);
 }

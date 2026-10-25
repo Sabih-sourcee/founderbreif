@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   DOCUMENT_OUTPUT_TYPES,
   DocumentOutputType,
@@ -10,7 +10,7 @@ interface Props {
   initialIdea: string;
   initialDocType?: DocumentOutputType;
   initialLanguage?: SpokenLanguage;
-  onContinue: (idea: string, docType: DocumentOutputType, language: SpokenLanguage) => void;
+  onNext: (idea: string, docType: DocumentOutputType, language: SpokenLanguage) => void;
   onInstantGenerate: (idea: string, docType: DocumentOutputType, language: SpokenLanguage) => void;
   onBack: () => void;
 }
@@ -33,11 +33,26 @@ function formatDuration(sec: number): string {
   return `${String(mins).padStart(2, "0")}:${String(rem).padStart(2, "0")}`;
 }
 
-export default function DescribeIdeaScreen({
+function blobToBase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const result = String(reader.result || "");
+      const comma = result.indexOf(",");
+      resolve(comma >= 0 ? result.slice(comma + 1) : result);
+    };
+    reader.onerror = () => reject(reader.error ?? new Error("Could not read the recording."));
+    reader.readAsDataURL(blob);
+  });
+}
+
+type VoicePhase = "idle" | "recording" | "paused" | "transcribing";
+
+export function DescribeIdeaScreen({
   initialIdea,
   initialDocType = "PRD",
   initialLanguage = "Urdu",
-  onContinue,
+  onNext,
   onInstantGenerate,
   onBack,
 }: Props) {
@@ -46,28 +61,162 @@ export default function DescribeIdeaScreen({
   const [selectedLanguage, setSelectedLanguage] = useState<SpokenLanguage>(initialLanguage);
   const [voiceSheetOpen, setVoiceSheetOpen] = useState(false);
   const [recordingSec, setRecordingSec] = useState(0);
+  const [voicePhase, setVoicePhase] = useState<VoicePhase>("idle");
+  const [voiceError, setVoiceError] = useState("");
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
+  const sessionRef = useRef(0);
 
   useEffect(() => {
     setIdea(initialIdea);
   }, [initialIdea]);
 
+  const releaseMic = () => {
+    sessionRef.current += 1;
+    const rec = mediaRecorderRef.current;
+    if (rec && rec.state !== "inactive") {
+      rec.onstop = null;
+      try {
+        rec.stop();
+      } catch {
+        /* already stopped */
+      }
+    }
+    streamRef.current?.getTracks().forEach((track) => track.stop());
+    streamRef.current = null;
+    mediaRecorderRef.current = null;
+  };
+
+  const beginRecording = async () => {
+    releaseMic();
+    const session = sessionRef.current;
+    setVoiceError("");
+    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
+      setVoiceError("Voice transcription isn't available in this browser. Type your idea instead.");
+      setVoicePhase("idle");
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      if (session !== sessionRef.current) {
+        stream.getTracks().forEach((track) => track.stop());
+        return;
+      }
+      streamRef.current = stream;
+      const preferred = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4"];
+      const mimeType = preferred.find((type) => MediaRecorder.isTypeSupported(type)) ?? "";
+      const rec = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+      chunksRef.current = [];
+      rec.ondataavailable = (event) => {
+        if (event.data.size > 0) chunksRef.current.push(event.data);
+      };
+      rec.start();
+      mediaRecorderRef.current = rec;
+      setVoicePhase("recording");
+    } catch {
+      if (session === sessionRef.current) {
+        setVoiceError("Microphone permission is needed to transcribe your idea.");
+        setVoicePhase("idle");
+      }
+    }
+  };
+
   useEffect(() => {
     if (!voiceSheetOpen) return;
+    setRecordingSec(0);
+    void beginRecording();
+    return () => releaseMic();
+    // Recording starts once per time the sheet opens.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [voiceSheetOpen]);
+
+  useEffect(() => {
+    if (!voiceSheetOpen || voicePhase !== "recording") return;
     const t = setInterval(() => setRecordingSec((s) => s + 1), 1000);
     return () => clearInterval(t);
-  }, [voiceSheetOpen]);
+  }, [voiceSheetOpen, voicePhase]);
 
   const openVoiceNoteSheet = () => {
     setRecordingSec(0);
+    setVoiceError("");
     setVoiceSheetOpen(true);
   };
 
-  const confirmVoiceNoteSheet = () => {
+  const closeVoiceNoteSheet = () => {
+    releaseMic();
+    setVoicePhase("idle");
+    setVoiceError("");
     setVoiceSheetOpen(false);
-    if (!idea.trim()) {
-      const langObj =
-        SPOKEN_LANGUAGES.find((l) => l.id === selectedLanguage) ?? SPOKEN_LANGUAGES[0];
-      setIdea(langObj.samplePrompt);
+  };
+
+  const togglePause = () => {
+    if (voicePhase === "transcribing") return;
+    const rec = mediaRecorderRef.current;
+    if (!rec || voicePhase === "idle") {
+      void beginRecording();
+      return;
+    }
+    if (rec.state === "recording") {
+      rec.pause();
+      setVoicePhase("paused");
+      return;
+    }
+    if (rec.state === "paused") {
+      rec.resume();
+      setVoicePhase("recording");
+    }
+  };
+
+  const sendVoiceNote = async () => {
+    const rec = mediaRecorderRef.current;
+    if (!rec || voicePhase === "transcribing" || voicePhase === "idle") return;
+    setVoicePhase("transcribing");
+    setVoiceError("");
+    try {
+      if (rec.state === "paused") rec.resume();
+      const blob = await new Promise<Blob>((resolve, reject) => {
+        rec.onstop = () => {
+          resolve(new Blob(chunksRef.current, { type: rec.mimeType || "audio/webm" }));
+        };
+        rec.onerror = () => reject(new Error("Recording failed."));
+        rec.stop();
+      });
+      streamRef.current?.getTracks().forEach((track) => track.stop());
+      streamRef.current = null;
+      mediaRecorderRef.current = null;
+
+      if (blob.size < 800) {
+        setVoiceError("We couldn't hear any speech. Tap the mic and try again.");
+        setVoicePhase("idle");
+        return;
+      }
+
+      const audioBase64 = await blobToBase64(blob);
+      const mimeType = (blob.type || "audio/webm").split(";")[0];
+      const response = await fetch("/api/transcribe-voice", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ audioBase64, mimeType }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(
+          typeof data.error === "string" ? data.error : "Couldn't transcribe that recording."
+        );
+      }
+      const text = typeof data.text === "string" ? data.text.trim() : "";
+      if (!text) {
+        setVoiceError("We couldn't hear any speech. Tap the mic and try again.");
+        setVoicePhase("idle");
+        return;
+      }
+      setIdea((prev) => (prev.trim() ? `${prev.trim()} ${text}` : text).slice(0, 1000));
+      setVoicePhase("idle");
+      setVoiceSheetOpen(false);
+    } catch (error) {
+      setVoiceError(error instanceof Error ? error.message : "Couldn't transcribe. Try again.");
+      setVoicePhase("idle");
     }
   };
 
@@ -416,7 +565,7 @@ export default function DescribeIdeaScreen({
             <button
               type="button"
               disabled={!canProceed}
-              onClick={() => onContinue(idea.trim(), selectedDocType, selectedLanguage)}
+              onClick={() => onNext(idea.trim(), selectedDocType, selectedLanguage)}
               className="pill-secondary"
               style={{ flex: 1, opacity: canProceed ? 1 : 0.45, background: "#DAF7F3" }}
             >
@@ -560,8 +709,22 @@ export default function DescribeIdeaScreen({
             }}
           >
             <div style={{ fontSize: 17, fontWeight: 900, color: "#1C2120" }}>Voice Note</div>
-            <div style={{ fontSize: 12, fontWeight: 700, color: "#6E7F7C", marginTop: 2, marginBottom: 20 }}>
-              Speaking in {selectedLanguage} → {selectedDocType}
+            <div
+              style={{
+                fontSize: 12,
+                fontWeight: 700,
+                color: voiceError ? "#B91C1C" : "#6E7F7C",
+                marginTop: 2,
+                marginBottom: 20,
+              }}
+            >
+              {voiceError
+                ? voiceError
+                : voicePhase === "transcribing"
+                  ? "Transcribing…"
+                  : voicePhase === "paused"
+                    ? "Paused"
+                    : `Speaking in ${selectedLanguage} → ${selectedDocType}`}
             </div>
 
             {/* Dual-Tone Yellow-Green + Soft Gray Waveform matching Reference 2 */}
@@ -606,7 +769,7 @@ export default function DescribeIdeaScreen({
                 marginBottom: 20,
               }}
             >
-              {recordingSec > 0 ? formatDuration(recordingSec) : "02:50"}
+              {formatDuration(recordingSec)}
             </div>
 
             {/* Bottom Control Pill: X on left, Yellow-Green Mic in center, Paper Plane on right */}
@@ -623,7 +786,7 @@ export default function DescribeIdeaScreen({
             >
               <button
                 type="button"
-                onClick={() => setVoiceSheetOpen(false)}
+                onClick={closeVoiceNoteSheet}
                 style={{
                   width: 44,
                   height: 44,
@@ -640,7 +803,8 @@ export default function DescribeIdeaScreen({
 
               <button
                 type="button"
-                onClick={confirmVoiceNoteSheet}
+                onClick={togglePause}
+                disabled={voicePhase === "transcribing"}
                 style={{
                   width: 58,
                   height: 58,
@@ -648,25 +812,29 @@ export default function DescribeIdeaScreen({
                   border: "3px solid #FBFF28",
                   background: "linear-gradient(180deg, #EAB308, #84CC16)",
                   color: "#FFFFFF",
-                  cursor: "pointer",
+                  cursor: voicePhase === "transcribing" ? "default" : "pointer",
                   fontSize: 20,
+                  opacity: voicePhase === "transcribing" ? 0.5 : 1,
                 }}
               >
-                🎙
+                {voicePhase === "recording" ? "❚❚" : "🎙"}
               </button>
 
               <button
                 type="button"
-                onClick={confirmVoiceNoteSheet}
+                onClick={sendVoiceNote}
+                disabled={voicePhase === "idle" || voicePhase === "transcribing"}
                 style={{
                   width: 44,
                   height: 44,
                   borderRadius: "50%",
                   border: "none",
                   background: "#F3F4F6",
-                  cursor: "pointer",
+                  cursor:
+                    voicePhase === "idle" || voicePhase === "transcribing" ? "default" : "pointer",
                   fontWeight: 900,
                   fontSize: 16,
+                  opacity: voicePhase === "idle" || voicePhase === "transcribing" ? 0.4 : 1,
                 }}
               >
                 ➤

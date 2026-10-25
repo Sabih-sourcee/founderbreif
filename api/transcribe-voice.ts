@@ -14,7 +14,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   try {
-    const text = await transcribeAudio(audioBase64, mimeType || "audio/mp4");
+    const cleanMime = String(mimeType || "audio/mp4").split(";")[0];
+    const text = await transcribeAudio(audioBase64, cleanMime);
     json(res, 200, { text });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Transcription failed.";

@@ -1,0 +1,69 @@
+FounderBrief office handoff
+Branch: 90-percent-fixed
+Repo: https://github.com/Sabih-sourcee/founderbreif
+Live site: https://founderbreif.vercel.app
+Date: 26 Oct 2026
+
+Read this first, then continue. Do not commit .env, src/.env, or mobile/upload_certificate.pem.
+
+
+WHAT THIS SESSION CHANGED
+1. Web voice notes now record the microphone and send the audio to /api/transcribe-voice.
+   Before this, the Voice Note sheet pasted a sample sentence and did not transcribe.
+2. The local server accepts JSON { audioBase64, mimeType } as well as a file upload.
+   JSON body limit is 12mb so a real recording is not rejected.
+3. Transcription asks Gemini to return the spoken words. Empty audio is rejected instead of inventing a pitch.
+   Transcripts can be up to 1500 characters.
+4. The website boots again. LandingScreen and DescribeIdeaScreen are named exports, matching App.tsx.
+5. Supabase on the API now reads the names already set on Vercel:
+   SUPABASE_URL, VITE_SUPABASE_URL, and SUPABASE_SERVICE_ROLE_KEY.
+6. The phone app skips empty recording files before upload.
+
+
+WHAT WAS TESTED
+- Local site http://localhost:3000 loads. Record screen opens.
+- After the key was moved to the project-root .env, voice transcription stopped saying the Gemini key was missing.
+- Document generation works. POST /api/generate-brief returned a real PRD in about 40 seconds
+  (title started with "Dukandaar Ledger", about 10,800 characters, not the offline fallback).
+- The phone app in mobile/ was NOT installed or run on a device.
+- The browser window at localhost:3000 is the WEBSITE. The phone UI is the Expo app in mobile/.
+
+
+HOW TO RUN IT LOCALLY
+1. git checkout 90-percent-fixed
+2. git pull
+3. npm install
+4. Secrets must live in the PROJECT ROOT file named .env
+   The server does not read src/.env. If the key is only in src/.env, copy that file to .env in the repo root, then restart.
+   Required name: GEMINI_API_KEY
+   Also used: ADMIN_EMAIL, ADMIN_PASSWORD, APP_URL
+5. npm run dev
+6. Open http://localhost:3000
+7. Record -> mic -> speak -> send. Then Generate.
+
+
+STILL REQUIRED BEFORE A LIVE UPDATE
+1. On the Vercel project for founderbreif.vercel.app, add SUPABASE_SERVICE_ROLE_KEY
+   for Production AND Preview.
+   Copy the service_role secret from Supabase Project Settings -> API keys.
+   The publishable key already on Vercel is a different key. Do not reuse it.
+   This was NOT set in this session. Vercel team access was requested and not finished.
+2. Deploy THIS branch to production on founderbreif.vercel.app.
+   Transcription and the Supabase URL fix are in git only until that deploy.
+   Env already on that project (do not delete these):
+   GEMINI_API_KEY (Production and Preview)
+   APP_JWT_SECRET, APP_ADMIN_PASSWORD, APP_ADMIN_EMAIL (Production)
+   SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, VITE_SUPABASE_URL (Production; some also Preview)
+   SUPABASE_PROJECT_ID, VITE_SUPABASE_PROJECT_ID
+3. Phone store update, only after the website deploy:
+   mobile app already calls https://founderbreif.vercel.app
+   From the mobile folder, the previous release path was:
+   npx eas-cli build -p android --profile production
+   Do not start a store build until production transcription is confirmed on the live URL.
+
+
+DO NOT COMMIT
+- .env
+- src/.env
+- mobile/upload_certificate.pem
+- mobile/export-upload-pem.js

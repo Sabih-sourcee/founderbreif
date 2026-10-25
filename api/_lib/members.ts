@@ -1,4 +1,4 @@
-import { appAdminEmail } from "./env";
+import { appAdminEmail, appSupabaseServiceKey, appSupabaseUrl } from "./env";
 
 export type MemberPlan = "free" | "tester" | "pro" | "admin";
 
@@ -16,9 +16,8 @@ export interface MemberStatus {
 }
 
 function supabaseConfig(): { url: string; serviceKey: string } | null {
-  const url = process.env.APP_SUPABASE_URL || process.env.LANDING_SUPABASE_URL;
-  const serviceKey =
-    process.env.APP_SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const url = appSupabaseUrl();
+  const serviceKey = appSupabaseServiceKey();
   if (!url || !serviceKey) return null;
   return { url: url.replace(/\/$/, ""), serviceKey };
 }

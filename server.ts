@@ -32,7 +32,7 @@ app.use((req, res, next) => {
   next();
 });
 
-app.use(express.json());
+app.use(express.json({ limit: "12mb" }));
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -219,10 +219,35 @@ app.post("/api/generate-brief", async (req, res) => {
   }
 });
 
+function audioPayload(req: express.Request): { base64: string; mimeType: string } | null {
+  if (req.file?.buffer?.length) {
+    return {
+      base64: req.file.buffer.toString("base64"),
+      mimeType: (req.file.mimetype || "audio/mp4").split(";")[0],
+    };
+  }
+  const raw = req.body?.audioBase64;
+  if (typeof raw !== "string" || !raw.trim()) return null;
+  const comma = raw.indexOf(",");
+  const base64 = raw.startsWith("data:") && comma !== -1 ? raw.slice(comma + 1) : raw.trim();
+  const mimeType =
+    typeof req.body?.mimeType === "string" && req.body.mimeType
+      ? req.body.mimeType.split(";")[0]
+      : "audio/webm";
+  return { base64, mimeType };
+}
+
 // Transcribe voice note → text for mobile/web mic input (Urdu / Hindi / Arabic / English)
-app.post("/api/transcribe-voice", upload.single("audio"), async (req, res) => {
+app.post("/api/transcribe-voice", (req, res, next) => {
+  const contentType = req.headers["content-type"] || "";
+  if (contentType.includes("multipart/form-data")) {
+    return upload.single("audio")(req, res, next);
+  }
+  next();
+}, async (req, res) => {
   try {
-    if (!req.file?.buffer?.length) {
+    const audio = audioPayload(req);
+    if (!audio) {
       return res.status(400).json({ error: "Audio recording is required." });
     }
 
@@ -230,8 +255,7 @@ app.post("/api/transcribe-voice", upload.single("audio"), async (req, res) => {
       return res.status(500).json({ error: "GEMINI_API_KEY is not configured on the server." });
     }
 
-    const mimeType = req.file.mimetype || "audio/mp4";
-    const base64 = req.file.buffer.toString("base64");
+    const { mimeType, base64 } = audio;
 
     const response = await ai.models.generateContent({
       model: "gemini-2.5-flash",
@@ -243,9 +267,10 @@ app.post("/api/transcribe-voice", upload.single("audio"), async (req, res) => {
               inlineData: { mimeType, data: base64 },
             },
             {
-              text: `Transcribe the founder's spoken voice note from this audio.
+              text: `Transcribe the spoken words in this audio.
 Return ONLY the transcription as plain text — no labels, no commentary.
-Preserve mixed languages (Urdu اردو, Hindi हिन्दी, Arabic العربية, Roman Urdu, Hinglish, and English code-switching) accurately.`,
+Preserve mixed languages (Urdu اردو, Hindi हिन्दी, Arabic العربية, Roman Urdu, Hinglish, and English code-switching) accurately.
+If there is no intelligible speech, respond with exactly: EMPTY`,
             },
           ],
         },
@@ -253,7 +278,7 @@ Preserve mixed languages (Urdu اردو, Hindi हिन्दी, Arabic الع
     });
 
     const text = response.text?.trim();
-    if (!text) {
+    if (!text || text === "EMPTY") {
       return res
         .status(502)
         .json({ error: "Could not transcribe audio. Please try again or type your note." });

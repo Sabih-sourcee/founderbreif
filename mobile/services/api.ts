@@ -139,6 +139,10 @@ function audioMimeFromUri(uri: string): string {
 
 export async function transcribeVoiceRecording(audioUri: string): Promise<string> {
   const fileUri = toFileUri(audioUri);
+  const info = await FileSystem.getInfoAsync(fileUri);
+  if (!info.exists || ("size" in info && typeof info.size === "number" && info.size < 400)) {
+    throw new Error("The recording file was empty. Tap the mic and try again.");
+  }
   const audioBase64 = await FileSystem.readAsStringAsync(fileUri, {
     encoding: FileSystem.EncodingType.Base64,
   });
